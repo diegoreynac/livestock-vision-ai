@@ -1,0 +1,9 @@
+{
+    "project": "LivestockWeight",
+    "experiment": "dataset_audit",
+    "execution_time": "2026-07-15T03:12:34.027795",
+    "python_version": "3.10.9",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "dataset_root": "C:\\MSI\\Dataset\\cattle-weight",
+    "output_directory": "C:\\MSI\\LivestockWeight\\output\\dataset_audit\\2026-07-15_03-12-34"
+}
