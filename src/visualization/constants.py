@@ -1,0 +1,19 @@
+"""
+Visualization constants.
+"""
+
+BBOX_COLOR = (0, 255, 0)
+
+SEGMENTATION_COLOR = (255, 0, 0)
+
+KEYPOINT_COLOR = (0, 0, 255)
+
+LABEL_COLOR = (255, 255, 255)
+
+LINE_THICKNESS = 2
+
+POINT_RADIUS = 4
+
+FONT_SCALE = 0.6
+
+FONT_THICKNESS = 2

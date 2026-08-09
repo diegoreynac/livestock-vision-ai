@@ -12,6 +12,9 @@ from pathlib import Path
 from src.dataset.enums import DatasetType
 from src.dataset.enums import Sex
 from src.dataset.enums import View
+from src.coco.models import (
+    COCOAnnotation
+)
 
 
 # ==========================================================
@@ -38,10 +41,22 @@ class ImageRecord:
 
     folder: "ImageFolder | None" = None
 
+    # -------------------------------
+    # Stage 2 (COCO)
+    # -------------------------------
+
+    annotation: COCOAnnotation | None = None
+
     # ------------------------------------------------------
 
     @property
     def dataset(self) -> DatasetType:
+
+        if self.folder is None:
+
+            raise RuntimeError(
+                "ImageRecord is not attached to an ImageFolder."
+            )
 
         return self.folder.dataset
 
@@ -100,10 +115,20 @@ class ImageRecord:
 
             "filename": self.filename,
 
-            "filepath": str(self.filepath)
+            "filepath": str(self.filepath),
+
+
+            "has_annotation": self.has_annotation
 
         }
 
+    @property
+    def has_annotation(self) -> bool:
+        """
+        Returns True if the image has a COCO annotation.
+        """
+
+        return self.annotation is not None
 
 # ==========================================================
 # IMAGE FOLDER
@@ -126,6 +151,15 @@ class ImageFolder:
     records: list[ImageRecord] = field(default_factory=list)
 
     # ------------------------------------------------------
+
+    annotation_file: Path | None = None
+
+    @property
+    def has_coco(self) -> bool:
+        return (
+            self.annotation_file is not None
+            and self.annotation_file.exists()
+        )
 
     @property
     def image_count(self) -> int:

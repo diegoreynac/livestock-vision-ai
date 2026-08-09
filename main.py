@@ -14,8 +14,13 @@ from src.analysis.visualization import DatasetVisualizer
 from src.analysis.report import DatasetReport
 from time import perf_counter
 
+from pathlib import Path
 
+from src.coco.reader import COCOReader
+from src.coco.statistics import COCOStatistics
+from src.coco.validator import COCOValidator
 
+from src.visualization.visualizer import DatasetVisualizer as COCOVisualizer
 
 def main() -> None:
     """
@@ -85,6 +90,73 @@ def main() -> None:
     )
 
     report.generate_all()
+
+        # =====================================================
+    # COCO Pipeline
+    # =====================================================
+
+    context.logger.section(
+        "COCO Dataset"
+    )
+
+    # -----------------------------------------
+    # Read COCO annotations
+    # -----------------------------------------
+
+    coco_reader = COCOReader(context)
+
+    coco_reader.enrich(dataset)
+
+    context.logger.info(
+        f"COCO Images: {dataset.image_count}"
+    )
+
+    # -----------------------------------------
+    # COCO Statistics
+    # -----------------------------------------
+
+    coco_statistics = COCOStatistics()
+
+    # -----------------------------------------
+    # COCO Validation
+    # -----------------------------------------
+
+    validator = COCOValidator(context)
+
+    validation = validator.validate(
+        dataset
+    )
+
+    context.logger.info(
+        validation
+    )
+
+    # -----------------------------------------
+    # COCO Visualization
+    # -----------------------------------------
+
+    visualizer = COCOVisualizer(context)
+
+    output_dir = (
+        context.output_dir
+        / "coco_visualizations"
+    )
+
+    output_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    for record in dataset[:10]:
+
+        visualizer.visualize(
+            record,
+            output_dir / record.filename,
+        )
+
+    context.logger.info(
+        "COCO visualization completed."
+    )
 
     # =====================================================
     # Finish

@@ -117,6 +117,14 @@ class DatasetReader:
                     folder.name
                 )
 
+                coco_files = sorted(folder.glob("*.json"))
+
+                annotation_file = (
+                    coco_files[0]
+                    if coco_files
+                    else None
+                )
+
                 folders.append(
 
                     ImageFolder(
@@ -127,7 +135,9 @@ class DatasetReader:
 
                         view=view,
 
-                        path=images_path
+                        path=images_path,
+
+                        annotation_file=annotation_file,
 
                     )
 

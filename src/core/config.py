@@ -143,3 +143,49 @@ class ProjectConfig:
     def models_folder(self) -> Path:
 
         return self.output_root / "models"
+
+
+    @property
+    def coco_annotations(self) -> Path:
+        return self.coco_folder / "annotations.json"
+    
+    @property
+    def images_folder(self) -> Path:
+        """
+        Returns the directory containing the original images.
+        """
+
+        return self.path / "images"
+    
+    @property
+    def coco_folder(self) -> Path:
+        """
+        Returns the COCO annotation directory.
+        """
+
+        return self.path / f"COCO_{self.folder_name}"
+    
+    @property
+    def annotation_file(self) -> Path:
+        """
+        Returns the COCO annotation file.
+        """
+
+        return self.coco_folder / "annotations.json"
+    
+    @property
+    def masks_folder(self) -> Path:
+        """
+        Returns the segmentation mask directory.
+        """
+
+        return self.coco_folder / "masks"
+    
+    @property
+    def has_coco(self) -> bool:
+        """
+        Returns True if the folder contains COCO annotations.
+        """
+
+        return self.annotation_file.exists()
+    
