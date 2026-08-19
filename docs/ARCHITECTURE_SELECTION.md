@@ -594,18 +594,230 @@ The final choice between:
 will be based on experimental comparison of predictive performance and mobile-computational efficiency.
 
 
-## 7. Architecture 3 — TBD
+## 7. Architecture 3 — EfficientNet-based
 
-**TBD — ARCHITECTURE NOT YET SELECTED**
+### 7.1 Why EfficientNet
 
-- Architecture family: TBD
-- Motivation: TBD
-- Mobile considerations: TBD
-- Expected strengths: TBD
-- Expected limitations: TBD
-- Experimental validation: TBD
+EfficientNet is a family of convolutional neural networks that emphasizes a principled balance of depth, width and input resolution via compound model scaling. For this thesis, EfficientNet is relevant because it provides a compact set of backbone variants that are explicitly designed to offer good accuracy–efficiency trade-offs. That design objective makes EfficientNet useful for studying whether a carefully scaled backbone can provide competitive predictive performance while remaining feasible for on-device Android deployment and real-time inference.
 
-This section is a placeholder for the third family to be selected and documented here after initial exploration.
+EfficientNet is therefore a meaningful third family to compare against the detection-oriented (YOLO) and mobile-backbone-first (MobileNet) approaches. The comparison addresses the multi-objective nature of the thesis: predictive performance (detection, sex, weight) versus deployment efficiency (parameters, size, latency, memory).
+
+Important: references to EfficientNet variant capacities below are reference values from original model configurations and are not experimental results from the thesis dataset.
+
+
+### 7.2 EfficientNet architecture (conceptual)
+
+At a conceptual level, modern EfficientNet variants share several building blocks and design principles that are relevant to our selection:
+
+- MBConv blocks: mobile inverted bottleneck convolutional blocks that combine depthwise separable convolutions and pointwise expansions. MBConv blocks are efficient at extracting features with lower computational cost than standard convolutions.
+- Inverted residual structure: channel expansion followed by depthwise convolution and projection back to a lower-dimensional representation; supports efficient information flow and parameter efficiency.
+- Depthwise separable convolution: separates spatial and channel mixing to reduce multiply-add cost.
+- Squeeze-and-Excitation (SE): channel-wise recalibration that improves representational power with small overhead; many EfficientNet variants include SE modules inside MBConv blocks.
+- Residual connections (where applicable): shortcut connections help gradient flow and stabilize training.
+
+These components affect feature extraction quality and efficiency. For our dual-view multi-task problem, the backbone's ability to extract discriminative features for both shape (useful for weight) and local details (useful for sex and bounding-box cues) is important. EfficientNet's compound-scaling approach means that moving from B0 to B1 to B2 increases capacity and resolution in a controlled manner, allowing an experimental study of marginal gains versus computational cost.
+
+
+### 7.3 EfficientNet-B0
+
+**Primary candidate — TO BE EXPERIMENTALLY VALIDATED**
+
+Rationale for B0 as primary candidate:
+
+- B0 represents the baseline EfficientNet configuration with modest parameter count and computational cost, making it a practical starting point for mobile-oriented experiments.
+- Reference input resolution for B0 is 224×224, which is amenable to mobile inference and helps control latency.
+- As a smaller model, B0 leaves computational headroom for dual-view processing (two backbones or shared backbone), fusion layers, and multi-task heads while improving the chance of meeting real-time constraints on Android devices.
+
+These properties make EfficientNet-B0 an appropriate primary candidate for Architecture 3, but this selection is provisional and must be validated experimentally on our livestock dataset.
+
+
+### 7.4 EfficientNet-B1
+
+**Secondary candidate — TO BE EXPERIMENTALLY VALIDATED**
+
+Rationale for B1 as a controlled step up in capacity:
+
+- EfficientNet-B1 increases model capacity and uses a reference input resolution of 240×240. This provides a controlled increase in both representational power and spatial resolution relative to B0.
+- B1 is a useful secondary candidate to test whether modest increases in capacity and resolution yield meaningful improvements for the multi-task livestock problem that justify the additional computational and memory cost during deployment.
+
+B1 should be evaluated experimentally as a controlled capacity step above B0, not as a presumption of superiority.
+
+
+### 7.5 EfficientNet-B2
+
+**Optional sensitivity/ablation candidate — TO BE EXPERIMENTALLY VALIDATED**
+
+Rationale for considering B2 as an optional experiment:
+
+- EfficientNet-B2 uses a reference input resolution of 260×260 and, in the original/reference models, has approximately 9.2M parameters.
+- B2 offers greater capacity and higher-resolution inputs compared with B0 and B1, which may help tasks that benefit from spatial detail (for example, fine-grained sex cues or small-scale bounding-box precision).
+- However, B2 is more computationally and memory expensive and therefore less immediately attractive for strict mobile real-time constraints.
+
+Therefore B2 is documented as an OPTIONAL sensitivity or ablation experiment rather than a primary candidate. It can be used to probe whether further capacity/resolution improves performance enough to justify increased deployment cost.
+
+
+### 7.6 Reference comparison table
+
+The following table presents reference architectural values for context. These values are reference-only and must not be interpreted as measurements of our custom dual-view multi-task models.
+
+| Criterion | EfficientNet-B0 | EfficientNet-B1 | EfficientNet-B2 |
+|---|---:|---:|---:|
+| Reference parameters | ~5.3M | ~7.8M | ~9.2M |
+| Reference input resolution | 224×224 | 240×240 | 260×260 |
+| Relative capacity | Low | Medium | Medium–High |
+| Computational cost | Low | Medium | Medium–High |
+| Mobile deployment expectation | Lower cost | Moderate cost | Higher cost |
+| Primary role | PRIMARY | SECONDARY | OPTIONAL |
+| Thesis experimental result | TBD | TBD | TBD |
+
+Limitations of these reference values:
+
+- They reflect the original single-image classification configurations and do not include dual-view fusion, multi-task heads, or any custom modifications.
+- Input resolution, head design, and implementation details affect final parameter counts and computational cost.
+- FLOPs/MAdds conventions may differ between sources and are not directly compared here.
+
+Final parameter counts and computational costs for our dual-view multi-task models must be measured after implementation and will be reported as experimental results.
+
+
+### 7.7 Implications for the livestock task (hypotheses)
+
+Increasing model capacity and input resolution could plausibly help several aspects of the livestock problem:
+
+- Animal body shape: higher-resolution features may capture finer shape cues correlated with mass
+- Spatial information: larger input resolutions preserve more spatial detail useful for both localization and fine-grained appearance cues
+- Bounding-box prediction: improved localization precision may benefit from higher-resolution feature maps
+- Sex classification: subtle morphological cues may be easier to discriminate at higher resolution/capacity
+- Weight regression: richer multi-scale features may better capture the visual correlates of weight
+
+These are hypotheses to be tested. Increased capacity or resolution does not guarantee improved performance; empirical validation is required to quantify trade-offs between predictive gains and deployment cost.
+
+
+### 7.8 Dual-view EfficientNet conceptual design
+
+Conceptual dataflow (dual-backbone view):
+
+Side image
+    ↓
+EfficientNet backbone
+    ↓
+Side feature representation
+    ↓
+      Fusion
+    ↑
+Rear feature representation
+    ↑
+EfficientNet backbone
+    ↑
+Rear image
+
+After fusion:
+
+Fusion
+  ↓
+┌───────────────┬───────────────┬───────────────┐
+↓               ↓               ↓
+BBox            Sex             Weight
+
+This mirrors the dual-view patterns used in Architectures 1 and 2. The exact fusion mechanism remains TBD and will be selected and justified experimentally.
+
+
+### 7.9 Shared vs Independent Weights (EfficientNet)
+
+As with Architecture 2, two weight-sharing strategies are considered for EfficientNet:
+
+- Shared weights: one EfficientNet backbone processes both Side and Rear inputs (weight sharing). This reduces parameter count and model size and is attractive for mobile deployment, but may limit view-specific specialization.
+
+- Independent weights: separate EfficientNet backbone instances for Side and Rear. This allows per-view specialization at the cost of increased parameters, memory and inference cost.
+
+The trade-offs are the same conceptual ones described for MobileNet: shared weights reduce resource usage; independent weights increase representational flexibility. This is a controlled experimental factor and must be evaluated empirically.
+
+
+### 7.10 Parameter implications for dual-view deployment
+
+Conceptually, the total model parameter count depends on whether backbones are shared:
+
+- Shared B0: approximately one B0 backbone + fusion layers + BBox/Sex/Weight heads (conceptual)
+- Independent B0: approximately two B0 backbones + fusion layers + heads
+
+The same conceptual difference applies to B1 and B2. These are conceptual descriptions: final total parameter counts will depend on implementation choices (fusion architecture, head sizes, use of pre-trained layers) and must be measured after implementation.
+
+
+### 7.11 Mobile deployment implications
+
+When evaluating EfficientNet variants for on-device Android deployment, the following practical considerations apply:
+
+- Model size and parameter count influence binary size and storage requirements
+- Input resolution affects memory usage and per-inference compute cost (higher resolutions increase both)
+- Peak RAM usage during inference constrains deployment on lower-end devices
+- Quantization and pruning strategies may reduce size and latency but require separate validation
+- Actual inference latency depends on runtime, hardware acceleration (CPU, GPU, NNAPI), and implementation details
+
+Do not infer latency solely from parameter counts; latency must be measured on representative Android hardware and reported as part of experimental results.
+
+
+### 7.12 Transfer learning and pretraining
+
+EfficientNet backbones are commonly available with ImageNet-pretrained weights. A practical strategy for the thesis is to initialize convolutional feature extractors from ImageNet-pretrained checkpoints, remove or omit the original classifier head, and attach our fusion module and multi-task heads:
+
+ImageNet pretrained EfficientNet
+    ↓
+remove/omit classifier
+    ↓
+feature extractor
+    ↓
+fusion module
+    ↓
+BBox / Sex / Weight heads
+
+Whether to freeze early layers, fine-tune the full backbone, or adopt staged unfreezing is a training-protocol decision and belongs in TRAINING_PROTOCOL.md. Transfer learning can accelerate convergence and improve initial performance, but final strategies must be experimentally validated.
+
+
+### 7.13 B0 vs B1 vs B2 decision rationale
+
+Summary decision roles (preliminary):
+
+- EfficientNet-B0: PRIMARY candidate — chosen for its parameter efficiency and mobile suitability; expected to be the most deployment-friendly starting point.
+- EfficientNet-B1: SECONDARY candidate — a controlled upward step in capacity and resolution to measure marginal gains versus cost.
+- EfficientNet-B2: OPTIONAL sensitivity/ablation candidate — higher capacity and resolution for probing whether further scaling yields practical benefits.
+
+Rationale:
+
+- The primary priority for the thesis is to find architectures that achieve acceptable predictive performance while meeting mobile deployment constraints. B0 addresses this priority directly.
+- B1 provides a nearby capacity increase to test whether modest scaling yields meaningful improvements in accuracy that justify additional deployment cost.
+- B2 is reserved for optional testing when the research question specifically targets sensitivity to further capacity/resolution.
+
+All choices are provisional and subject to empirical validation.
+
+
+### 7.14 Cross-architecture consistency
+
+Selecting EfficientNet variants for Architecture 3 does not change the project's common experimental requirements. All three families (YOLO, MobileNet, EfficientNet) must comply with the same:
+
+- Side + Rear dataset and annotations
+- Train/validation/test split
+- Target definitions and label formats
+- Preprocessing and augmentation policy (TRAINING_PROTOCOL.md)
+- Evaluation metrics and reporting format
+- Deployment benchmarking methodology
+
+This ensures that architecture-level differences are the primary source of performance variation in the final comparison.
+
+
+### 7.15 Architecture 3 Status
+
+Primary candidate:
+EfficientNet-B0
+
+Secondary candidate:
+EfficientNet-B1
+
+Optional sensitivity candidate:
+EfficientNet-B2
+
+Status:
+Candidate architecture — not experimentally validated.
+
+Final selection among B0/B1 (and optional use of B2) will be based on controlled experiments that balance predictive performance and mobile deployment feasibility.
 
 
 ## 8. Dual-view Experimental Baselines
