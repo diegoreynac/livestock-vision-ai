@@ -269,18 +269,329 @@ Mobile deployment constraints strongly influence candidate selection. For YOLO v
 The final Android runtime and quantization choices remain TBD.
 
 
-## 6. Architecture 2 — TBD
+## 6. Architecture 2 — MobileNet-based
 
-**TBD — ARCHITECTURE NOT YET SELECTED**
+### 6.1 Why MobileNet
 
-- Architecture family: TBD
-- Motivation: TBD
-- Mobile considerations: TBD
-- Expected strengths: TBD
-- Expected limitations: TBD
-- Experimental validation: TBD
+MobileNet is relevant to this thesis because it was designed for computationally constrained and mobile-oriented environments. It provides a lightweight convolutional backbone that can be used to extract visual features with a substantially smaller computational footprint than heavier classification or detection backbones. This is important because the final application must eventually run on Android using Kotlin and must support practical real-time inference.
 
-This section is a placeholder for the second family that will be selected and documented here after initial exploration. Candidate families under consideration (but not decided) include MobileNet-family and EfficientNet-family variants, among others. No family selection or final decisions are recorded here.
+The comparison is therefore not simply whether a model is more accurate in a benchmark setting. The central question is which architecture offers the most suitable trade-off between:
+
+- predictive performance
+- parameter count
+- computational complexity
+- model size
+- memory footprint
+- inference latency
+- mobile deployment feasibility
+
+MobileNet is therefore a meaningful contrast to YOLO. YOLO is primarily associated with detection-first pipelines and object localization, while MobileNet is a mobile-backbone-first feature extractor that can be adapted to dual-view, multi-task prediction. This makes MobileNet relevant for a thesis problem where detection is only one objective among several tasks, and deployment feasibility is a major constraint.
+
+At this stage, MobileNet is a candidate architecture under consideration, not a proven winner.
+
+### 6.2 MobileNet Family
+
+The MobileNet family is a collection of lightweight CNN architectures designed for efficient feature extraction in resource-limited environments. In the context of this thesis, the family is attractive because it allows us to compare a lightweight mobile-oriented backbone against a detection-oriented architecture (YOLO) under the same dual-view multi-task setting.
+
+The family includes several variants with different trade-offs. For this thesis, the primary comparison is between:
+
+- MobileNetV2
+- MobileNetV3-Small
+- MobileNetV3-Large
+
+These variants differ in depth, width, block structure, and computational cost. The purpose of comparing them is not to claim a final winner, but to identify a MobileNet architecture that best balances performance and deployment efficiency.
+
+### 6.3 MobileNetV2
+
+MobileNetV2 is an established mobile CNN architecture based on inverted residual blocks and linear bottlenecks. Its lightweight design and efficient depthwise separable structure make it a useful baseline/reference for mobile-oriented feature extraction.
+
+Why it is relevant:
+
+- established lightweight CNN backbone
+- strong reference for efficient feature extraction
+- useful baseline for comparing lightweight mobile design choices with more recent MobileNetV3 variants
+
+MobileNetV2 remains a useful comparison point, but it is not automatically selected as the final architecture. It serves as a reference for what a mobile backbone can provide under constrained computational budgets.
+
+### 6.4 MobileNetV3-Small
+
+**Primary candidate — TO BE EXPERIMENTALLY VALIDATED**
+
+MobileNetV3-Small is the primary candidate within Architecture 2 because it is optimized specifically for lightweight and mobile inference. It is designed to maintain low computational cost while providing competitive feature representation quality.
+
+Why MobileNetV3-Small is attractive for this thesis:
+
+- smaller capacity than V3-Large
+- lower parameter count and memory burden
+- lower computational cost than larger mobile backbones
+- better alignment with the thesis requirement for real-time inference on Android hardware
+- leaves more computational budget for dual-view fusion and multi-task heads
+
+This does not mean MobileNetV3-Small is experimentally superior. It is the most mobile-oriented primary candidate under consideration and will be evaluated against the other architecture families under the common experimental protocol.
+
+### 6.5 MobileNetV3-Large
+
+MobileNetV3-Large is a higher-capacity variant than MobileNetV3-Small. It may provide stronger representational capacity and potentially better feature quality for complex visual tasks, but it also increases computational and memory demands.
+
+Why it is considered:
+
+- more representational capacity than V3-Small
+- potentially stronger visual features for complex tasks
+- useful as a stronger mobile-oriented comparison point
+
+Why it is not automatically preferred:
+
+- higher computational and memory cost
+- potentially less favorable for real-time Android deployment
+- may leave less headroom for the dual-view fusion and multi-task prediction pipeline
+
+MobileNetV3-Large remains a relevant alternative, but its final usefulness must be determined experimentally.
+
+### 6.6 MobileNet Comparison
+
+The MobileNet comparison is designed to study an architectural trade-off rather than simply selecting the model with the largest capacity. The decision is not based only on maximum accuracy; it must also consider mobile suitability.
+
+MobileNetV2:
+- inverted residual blocks
+- linear bottlenecks
+- lightweight and efficient design
+- established mobile CNN architecture
+- useful baseline/reference
+
+MobileNetV3-Small:
+- optimized for lightweight/mobile inference
+- smaller capacity than V3-Large
+- strong candidate when latency and model size are important
+- primary candidate for Architecture 2
+
+MobileNetV3-Large:
+- higher capacity than V3-Small
+- potentially better representation power
+- higher computational and memory cost
+- useful as a stronger mobile-oriented comparison point
+
+This comparison is intended to support a practical design decision: which MobileNet family offers the best balance between predictive quality and mobile deployment feasibility.
+
+Conceptually, the difference between Architecture 1 and Architecture 2 is important:
+
+Architecture 1: YOLO = detection-first architecture.
+
+Image
+  |
+YOLO
+  |
+BBox / detection features
+  |
+additional task heads / fusion as required
+
+Architecture 2: MobileNet = mobile-backbone-first architecture.
+
+Side --> MobileNet --\
+                      > Fusion --> BBox / Sex / Weight
+Rear --> MobileNet --/
+
+This creates a meaningful architectural comparison: the YOLO family is designed around localization and detection-oriented representations, while the MobileNet family is designed around efficient feature extraction and mobile deployment. Neither is assumed to be superior before experiments.
+
+### 6.7 Dual-view MobileNet Architecture
+
+The conceptual design for Architecture 2 is a dual-view, multi-task feature-extraction system built around MobileNet backbones.
+
+Side Image
+    |
+    v
+MobileNet Backbone
+    |
+    v
+Side Features
+    |
+    |
+    v
+  Fusion
+    ^
+    |
+Rear Features
+    ^
+    |
+MobileNet Backbone
+    ^
+    |
+Rear Image
+
+After feature fusion:
+
+Fused Features
+    |
+    +----> Bounding Box Head
+    |
+    +----> Sex Classification Head
+    |
+    +----> Weight Regression Head
+
+This architecture is:
+
+- dual-view
+- multi-task
+- feature-fusion based
+- designed with mobile deployment in mind
+
+The exact backbone variant, the exact fusion mechanism, and the final prediction-head implementations remain TBD. This section documents the architectural concept, not a finalized implementation.
+
+### 6.8 Shared vs Independent Weights
+
+A major design decision within Architecture 2 is whether the two views share the same MobileNet backbone or use separate backbones.
+
+#### Variant A — Shared Weights
+
+The same MobileNet backbone processes both Side and Rear images.
+
+Conceptually:
+
+Side ----\
+           >---- SAME MobileNet weights
+Rear ----/
+
+The resulting features are then fused.
+
+Expected advantages:
+
+- approximately one backbone's worth of trainable parameters
+- lower model size
+- lower memory footprint
+- potentially lower inference cost
+- attractive for Android deployment
+
+Possible limitation:
+
+- Side and Rear views represent substantially different viewpoints
+- a single shared feature extractor may not specialize optimally for both views
+
+This does not mean shared weights are better; it only indicates a possible efficiency advantage worth testing.
+
+#### Variant B — Independent Weights
+
+Side and Rear each use their own MobileNet backbone.
+
+Conceptually:
+
+Side --> MobileNet A
+Rear --> MobileNet B
+
+The features are then fused.
+
+Expected advantages:
+
+- each branch can specialize for its viewpoint
+- greater representational flexibility
+
+Expected costs:
+
+- approximately two backbone parameter sets
+- larger model size
+- higher memory requirements
+- potentially higher inference latency
+
+This does not mean independent weights are better; it only indicates a possible representational benefit worth testing.
+
+### 6.9 Controlled Weight-Sharing Experiment
+
+The Shared vs Independent question is intended as a controlled experiment within Architecture 2, not as two official architecture families. The experimental question is:
+
+"Does the potential representational benefit of independent Side and Rear backbones justify the additional computational and memory cost compared with a shared-weight backbone?"
+
+The two variants must use the same:
+
+- dataset
+- train/validation/test split
+- preprocessing
+- input resolution
+- augmentation policy
+- optimizer
+- learning-rate policy
+- training budget
+- evaluation metrics
+- hardware and software environment for benchmarking
+
+The intended independent variable is the weight-sharing strategy. No experimental results are claimed here.
+
+### 6.10 Multi-task Prediction Heads
+
+Architecture 2 must support the same multi-task outputs as all architectures in the thesis.
+
+Fused Features
+    |
+    +--> BBox Head
+    +--> Sex Head
+    +--> Weight Head
+
+These outputs are:
+
+1. Bounding box
+2. Sex classification (F / M)
+3. Weight regression in kilograms
+
+The exact final head architecture remains TBD and will be defined in the implementation phase according to data annotations, task-specific supervision, and results of experimental validation.
+
+### 6.11 Parameter and Computational Complexity
+
+Architecture defines the model topology: layers, operations, connections, channel dimensions, and overall structure. Parameters are learned numerical values such as convolution weights, bias values, and linear-layer coefficients. Pre-trained weights are parameter values learned previously on another dataset, and a checkpoint is a saved set of learned parameter values from a training run.
+
+This distinction is important: YOLO and MobileNet both contain trainable parameters and learned weights. The architecture itself is not the same as the learned parameter values stored inside a checkpoint. A model architecture can be the same while the checkpoint differs depending on training state or pretraining history.
+
+Reference complexity values are useful for architecture analysis, but they are not direct measurements from the custom dual-view multi-task thesis model. The final parameter count and computational cost must be measured after the custom architecture is implemented and evaluated under the common protocol.
+
+The following values are reference-only comparisons for context and are not thesis results:
+
+| Reference model | Parameters | Computational reference |
+|-----------------|-----------:|------------------------:|
+| YOLO26n | ~2.4M | ~5.4 GFLOPs |
+| YOLO26s | ~9.5M | ~20.7 GFLOPs |
+| MobileNetV2 1.0 | ~3.4M | ~300M MAdds |
+| MobileNetV3-Small 1.0 | ~2.5M | ~56M MAdds |
+| MobileNetV3-Large 1.0 | ~5.4M | ~219M MAdds |
+
+Important limitations:
+
+- these figures come from reference/original model configurations
+- they may differ in input resolution, implementation, task, and head design
+- FLOPs and MAdds are not always directly comparable without matching conventions
+- detection models and classification models have different computational profiles
+- our custom dual-view multi-task architecture includes fusion layers, multiple heads, and the Side + Rear pipeline, which are not captured by a single original-reference backbone number
+
+Therefore the final thesis comparison must measure parameter count and computational cost using our implemented architectures under a common experimental protocol.
+
+### 6.12 Mobile Deployment Considerations
+
+The final application target is Android Studio + Kotlin, and the model must eventually support practical real-time inference. This is central to the architecture-selection decision.
+
+Architecture 2 is therefore evaluated in terms of:
+
+- parameter count
+- model size
+- memory footprint
+- computational cost
+- inference latency
+- hardware used for benchmarking
+- eventual Android runtime compatibility
+
+The exact Android runtime remains TBD. The architecture is being assessed for mobile feasibility, but no final runtime decision is made here.
+
+### 6.13 Architecture 2 Status
+
+Primary candidate:
+MobileNetV3-Small
+
+Weight-sharing variants:
+- Shared weights
+- Independent weights
+
+Status:
+Candidate architecture — not experimentally validated.
+
+The final choice between:
+- MobileNetV3-Small shared
+- MobileNetV3-Small independent
+
+will be based on experimental comparison of predictive performance and mobile-computational efficiency.
 
 
 ## 7. Architecture 3 — TBD
@@ -368,6 +679,9 @@ The following items are recorded as DECIDED for the project:
 - YOLO26 is the first architecture family being investigated. (DECIDED)
 - Within YOLO26, YOLO26n is the PRIMARY CANDIDATE. (PRIMARY CANDIDATE)
 - Within YOLO26, YOLO26s is an ALTERNATIVE CANDIDATE. (ALTERNATIVE)
+- MobileNet is the second architecture family currently under investigation. (DECIDED)
+- Within MobileNet, MobileNetV3-Small is the PRIMARY CANDIDATE. (PRIMARY CANDIDATE)
+- MobileNetV2 and MobileNetV3-Large remain comparative alternatives within Architecture 2. (ALTERNATIVE)
 - Final architecture selection must be experimentally validated. (DECIDED)
 
 
@@ -447,7 +761,10 @@ This document focuses on the technical rationale for candidate families and how 
 | YOLO as Architecture 1 family | DECIDED |
 | YOLO26n | PRIMARY CANDIDATE |
 | YOLO26s | ALTERNATIVE |
-| Architecture 2 | TBD |
+| MobileNet as Architecture 2 family | DECIDED |
+| MobileNetV3-Small | PRIMARY CANDIDATE |
+| MobileNetV2 | ALTERNATIVE |
+| MobileNetV3-Large | ALTERNATIVE |
 | Architecture 3 | TBD |
 | Fusion mechanism | TBD |
 | Weight sharing | TBD |
@@ -460,4 +777,4 @@ This document focuses on the technical rationale for candidate families and how 
 ---
 
 **Document status:** Architecture selection record (candidates and rationale).  
-**Next steps:** populate Architecture 2 and Architecture 3 with selected families after initial exploration; perform controlled experiments per TRAINING_PROTOCOL.md and record results in this document.
+**Next steps:** complete Architecture 3 after its family is selected, perform controlled experiments per TRAINING_PROTOCOL.md, and record results in this document.
