@@ -791,7 +791,7 @@ All choices are provisional and subject to empirical validation.
 
 ### 7.14 Cross-architecture consistency
 
-Selecting EfficientNet variants for Architecture 3 does not change the project's common experimental requirements. All three families (YOLO, MobileNet, EfficientNet) must comply with the same:
+Selecting EfficientNet variants for Architecture 3 does not change the project's common experimental requirements. All three families (YOLO, MobileNet, EfficientNet) must follow the common experimental protocol defined in TRAINING_PROTOCOL.md:
 
 - Side + Rear dataset and annotations
 - Train/validation/test split
@@ -800,8 +800,7 @@ Selecting EfficientNet variants for Architecture 3 does not change the project's
 - Evaluation metrics and reporting format
 - Deployment benchmarking methodology
 
-This ensures that architecture-level differences are the primary source of performance variation in the final comparison.
-
+This is intended to minimize experimental confounding and make architecture-level differences the principal factor under investigation.
 
 ### 7.15 Architecture 3 Status
 
