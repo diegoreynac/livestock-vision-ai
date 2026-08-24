@@ -142,19 +142,58 @@ class DualViewTorchModel(BaseModel, nn.Module):
             self.use_torchvision_backbone = True
 
         elif architecture == "yolo":
-            # lightweight custom YOLO-like backbone implemented above
-            widths_map = {
-                "nano": (16, 32, 64, 128),
-                "small": (32, 64, 128, 256),
-                "medium": (64, 128, 256, 512),
+            # The project uses the official Ultralytics YOLO implementation as the
+            # source of the real backbone, without any downloaded `.pt` asset or
+            # silent fallback. The YAML config creates the network definition without
+            # fetching a pretrained checkpoint.
+            try:
+                from ultralytics import YOLO as _YOLOLoader  # type: ignore
+            except Exception as exc:  # pragma: no cover - import-level guard
+                raise RuntimeError(
+                    "Ultralytics YOLO is required for the YOLO architecture and no custom fallback is used."
+                ) from exc
+
+            variant_map = {
+                "nano": "yolov8n.yaml",
+                "small": "yolov8s.yaml",
+                "medium": "yolov8m.yaml",
             }
-            widths = widths_map.get(variant, (16, 32, 64, 128))
-            self.backbone_side = _YOLOLikeBackbone(widths)
-            self._backbone_feat_dim = widths[-1]
+            if variant not in variant_map:
+                raise ValueError(
+                    f"Unsupported YOLO variant '{variant}'. Supported variants: nano, small, medium."
+                )
+            config_name = variant_map[variant]
+
+            def _make_yolo_backbone() -> nn.Module:
+                yolo = _YOLOLoader(config_name)
+                # The official detection model is not a plain feature extractor; the
+                # first nine sequential blocks form the backbone and are valid for
+                # image-to-feature extraction. Using the full DetectionModel stack
+                # triggers the YOLO head's concat logic, which expects detection-style
+                # multi-scale inputs and fails on a normal tensor.
+                backbone = nn.Sequential(*list(yolo.model.model.children())[:9])
+                backbone.eval()
+                return backbone
+
+            # Infer output channels by running a dummy tensor through the extracted
+            # backbone. This keeps the fusion layer sized correctly without any
+            # external pretrained assets.
+            def _infer_out_channels(mod: nn.Module) -> int:
+                mod_cpu = mod.to("cpu")
+                mod_cpu.eval()
+                with torch.no_grad():
+                    x = torch.zeros(1, 3, 224, 224)
+                    out = mod_cpu(x)
+                if out.ndim >= 2:
+                    return int(out.shape[1])
+                return 0
+
+            self.backbone_side = _make_yolo_backbone()
+            self._backbone_feat_dim = _infer_out_channels(self.backbone_side)
             if share_backbone:
                 self.backbone_rear = self.backbone_side
             else:
-                self.backbone_rear = _YOLOLikeBackbone(widths)
+                self.backbone_rear = _make_yolo_backbone()
             self.use_torchvision_backbone = False
 
         else:
@@ -183,7 +222,10 @@ class DualViewTorchModel(BaseModel, nn.Module):
             vec = _global_pool_flat(feats)
             return vec
         else:
-            return backbone(x)
+            feats = backbone(x)
+            if feats.ndim > 2:
+                feats = _global_pool_flat(feats)
+            return feats
 
     def forward(self, side: Any, rear: Any, **kwargs: Any) -> ModelOutput:
         """Perform a PyTorch forward pass.

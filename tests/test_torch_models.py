@@ -43,6 +43,10 @@ class TestTorchModels(unittest.TestCase):
         out = model.predict(self.side, self.rear)
         self.assertIsInstance(out, ModelOutput)
 
+    def test_yolo_unsupported_variant_raises_value_error(self):
+        with self.assertRaisesRegex(ValueError, "Unsupported YOLO variant"):
+            DualViewTorchModel(architecture="yolo", variant="unsupported")
+
 
 if __name__ == "__main__":
     unittest.main()
