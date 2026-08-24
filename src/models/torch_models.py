@@ -20,14 +20,17 @@ Design summary
 
 Notes
 - This module uses torchvision backbones when available (MobileNetV3 and
-  EfficientNet-B0). For YOLO, a lightweight custom convolutional backbone is
-  implemented to avoid adding a heavy external YOLO package.
+  EfficientNet-B0).
+- The YOLO path uses the official Ultralytics YOLO26 backbone through the
+  installed `ultralytics` package; the detection head is intentionally not
+  retained because this model is used as a feature extractor for the dual-view
+  fusion tower.
 - count_parameters() and model_size() compute real values from PyTorch
   parameters.
 """
 
 from pathlib import Path
-from typing import Any, Tuple
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -45,31 +48,6 @@ from src.models.output import ModelOutput
 def _global_pool_flat(x: torch.Tensor) -> torch.Tensor:
     # Global average pool to (batch, channels)
     return F.adaptive_avg_pool2d(x, 1).flatten(1)
-
-
-class _YOLOLikeBackbone(nn.Module):
-    """A small YOLO-like backbone implemented with plain convolutions.
-
-    This backbone produces a compact feature vector suitable for fusion and
-    downstream heads. It is deliberately lightweight and does not implement a
-    full YOLO detection head — the detection head is implemented separately
-    in the DualViewTorchModel's bbox head.
-    """
-
-    def __init__(self, widths: Tuple[int, ...] = (16, 32, 64, 128)) -> None:
-        super().__init__()
-        layers = []
-        in_ch = 3
-        for w in widths:
-            layers.append(nn.Conv2d(in_ch, w, kernel_size=3, stride=2, padding=1, bias=False))
-            layers.append(nn.BatchNorm2d(w))
-            layers.append(nn.ReLU(inplace=True))
-            in_ch = w
-        self.features = nn.Sequential(*layers)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.features(x)
-        return _global_pool_flat(x)
 
 
 class DualViewTorchModel(BaseModel, nn.Module):
@@ -142,21 +120,24 @@ class DualViewTorchModel(BaseModel, nn.Module):
             self.use_torchvision_backbone = True
 
         elif architecture == "yolo":
-            # The project uses the official Ultralytics YOLO implementation as the
-            # source of the real backbone, without any downloaded `.pt` asset or
-            # silent fallback. The YAML config creates the network definition without
-            # fetching a pretrained checkpoint.
+            # Official Ultralytics YOLO26 exposes the detection model as a standard
+            # `DetectionModel` with a backbone + neck + head pipeline. For this project,
+            # we use only the inflicted backbone blocks 0..10 inclusive as a feature
+            # extractor. The neck/head blocks 11..23 are intentionally omitted because
+            # they are built for multi-scale detection outputs and do not act as a
+            # generic image encoder for the fused dual-view classification/regression
+            # tower used downstream.
             try:
                 from ultralytics import YOLO as _YOLOLoader  # type: ignore
             except Exception as exc:  # pragma: no cover - import-level guard
                 raise RuntimeError(
-                    "Ultralytics YOLO is required for the YOLO architecture and no custom fallback is used."
+                    "Ultralytics YOLO is required for the YOLO architecture; no custom YOLO-like fallback is used."
                 ) from exc
 
             variant_map = {
-                "nano": "yolov8n.yaml",
-                "small": "yolov8s.yaml",
-                "medium": "yolov8m.yaml",
+                "nano": "yolo26n.yaml",
+                "small": "yolo26s.yaml",
+                "medium": "yolo26m.yaml",
             }
             if variant not in variant_map:
                 raise ValueError(
@@ -164,20 +145,16 @@ class DualViewTorchModel(BaseModel, nn.Module):
                 )
             config_name = variant_map[variant]
 
-            def _make_yolo_backbone() -> nn.Module:
+            def _make_yolo26_backbone() -> nn.Module:
+                # The official YOLO26 backbone is the backbone stage defined in the
+                # shipped YAML: Conv -> Conv -> C3k2 -> Conv -> C3k2 -> Conv -> C3k2
+                # -> Conv -> C3k2 -> SPPF -> C2PSA. This is exactly modules 0..10
+                # inclusive; modules 11+ are the neck/head stack for object detection.
                 yolo = _YOLOLoader(config_name)
-                # The official detection model is not a plain feature extractor; the
-                # first nine sequential blocks form the backbone and are valid for
-                # image-to-feature extraction. Using the full DetectionModel stack
-                # triggers the YOLO head's concat logic, which expects detection-style
-                # multi-scale inputs and fails on a normal tensor.
-                backbone = nn.Sequential(*list(yolo.model.model.children())[:9])
+                backbone = nn.Sequential(*list(yolo.model.model.children())[:11])
                 backbone.eval()
                 return backbone
 
-            # Infer output channels by running a dummy tensor through the extracted
-            # backbone. This keeps the fusion layer sized correctly without any
-            # external pretrained assets.
             def _infer_out_channels(mod: nn.Module) -> int:
                 mod_cpu = mod.to("cpu")
                 mod_cpu.eval()
@@ -186,20 +163,23 @@ class DualViewTorchModel(BaseModel, nn.Module):
                     out = mod_cpu(x)
                 if out.ndim >= 2:
                     return int(out.shape[1])
-                return 0
+                raise RuntimeError("YOLO26 backbone did not produce a valid feature tensor")
 
-            self.backbone_side = _make_yolo_backbone()
+            self.backbone_side = _make_yolo26_backbone()
             self._backbone_feat_dim = _infer_out_channels(self.backbone_side)
             if share_backbone:
                 self.backbone_rear = self.backbone_side
             else:
-                self.backbone_rear = _make_yolo_backbone()
+                self.backbone_rear = _make_yolo26_backbone()
             self.use_torchvision_backbone = False
 
         else:
             raise ValueError(f"Unknown architecture: {architecture}")
 
-        # fusion MLP: projects concatenated features to a compact fusion dimension
+        # The backbone for each view produces one pooled feature vector per image.
+        # We concatenate the side and rear vectors to form a shared representation
+        # that the learned fusion MLP can mix across both viewpoints before the task
+        # heads predict bbox, sex, and weight.
         fusion_in = self._backbone_feat_dim * 2
         fusion_dim = max(128, fusion_in // 4)
         self.fusion = nn.Sequential(

@@ -38,10 +38,27 @@ class TestTorchModels(unittest.TestCase):
         out = model.predict(self.side, self.rear)
         self.assertIsInstance(out, ModelOutput)
 
-    def test_yolo_forward(self):
-        model = DualViewTorchModel(architecture="yolo", variant="nano")
-        out = model.predict(self.side, self.rear)
-        self.assertIsInstance(out, ModelOutput)
+    def test_yolo26_nano_forward_dual_view(self):
+        for share_backbone in (True, False):
+            with self.subTest(share_backbone=share_backbone):
+                model = DualViewTorchModel(architecture="yolo", variant="nano", share_backbone=share_backbone)
+                out = model.predict(self.side, self.rear)
+                self.assertIsInstance(out, ModelOutput)
+                self.assertIsInstance(out.bbox, tuple)
+                self.assertIsInstance(out.sex, str)
+                self.assertIsInstance(out.weight, float)
+                self.assertGreater(model.count_parameters(), 0)
+                self.assertGreater(model.model_size(), 0.0)
+
+    def test_yolo26_supported_variants_and_dual_view(self):
+        for variant in ("nano", "small", "medium"):
+            with self.subTest(variant=variant):
+                model = DualViewTorchModel(architecture="yolo", variant=variant, share_backbone=False)
+                out = model.predict(self.side, self.rear)
+                self.assertIsInstance(out, ModelOutput)
+                self.assertIsInstance(out.bbox, tuple)
+                self.assertIsInstance(out.sex, str)
+                self.assertIsInstance(out.weight, float)
 
     def test_yolo_unsupported_variant_raises_value_error(self):
         with self.assertRaisesRegex(ValueError, "Unsupported YOLO variant"):
