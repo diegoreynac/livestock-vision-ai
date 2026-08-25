@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 
 from pathlib import Path
+from typing import Any
 
 from src.core.context import ProjectContext
 from src.coco.statistics import COCOStatistics
@@ -31,11 +32,19 @@ from src.coco.models import (
 from src.coco.enums import KeypointVisibility
 
 
+RecordKey = tuple[str, str, str]
+
+
 class COCOReader:
     """
     Reads COCO annotations and enriches an existing
     LivestockDataset.
     """
+
+    # Cardinalities observed by COCOAudit in the current dataset. They are
+    # diagnostic expectations, not an acceptance constraint: a COCO keypoint
+    # payload is structurally valid whenever it follows the flat 3N form.
+    _KNOWN_KEYPOINT_CARDINALITIES = frozenset({4, 6, 9, 23})
 
     def __init__(
         self,
@@ -50,10 +59,7 @@ class COCOReader:
 
         self.data: dict = {}
 
-        self.record_index: dict[
-            str,
-            ImageRecord
-        ] = {}
+        self.record_index: dict[RecordKey, ImageRecord] = {}
 
         self.statistics = COCOStatistics()
 
@@ -159,13 +165,25 @@ class COCOReader:
 
         for record in dataset:
 
-            self.record_index[
-                record.filename
-            ] = record
+            if record.folder is None:
+                self._error(
+                    f"Record without folder cannot be indexed: {record.filename}"
+                )
+                continue
 
-            self.logger.info(
-                f"Records indexed: {len(self.record_index)}"
+            key = self._record_key(
+                record.folder,
+                record.filename,
             )
+
+            if key in self.record_index:
+                self._warning(
+                    "Duplicate record filename in the same context: "
+                    f"{self._format_record_key(key)}"
+                )
+                continue
+
+            self.record_index[key] = record
 
         self.statistics.images_indexed = len(
             self.record_index
@@ -174,6 +192,26 @@ class COCOReader:
         self.logger.info(
             f"Indexed {len(self.record_index)} images."
         ) 
+
+    @staticmethod
+    def _record_key(
+        folder: ImageFolder,
+        filename: str,
+    ) -> RecordKey:
+        """Build the contextual identity used for a physical image record."""
+
+        return (
+            folder.dataset.value,
+            folder.folder_name,
+            filename,
+        )
+
+    @staticmethod
+    def _format_record_key(key: RecordKey) -> str:
+        """Format a contextual record key for diagnostic logging."""
+
+        dataset, folder, filename = key
+        return f"{dataset}/{folder}/{filename}"
 
     def _process_folder(
         self,
@@ -284,63 +322,73 @@ class COCOReader:
         # Build image lookup table
         # --------------------------------------------------
 
-        image_index = {}
+        image_index: dict[int, dict] = {}
+        filenames_seen: set[str] = set()
 
         for image in data["images"]:
 
-            image_index[image["id"]] = image
+            image_id = image.get("id")
+            filename = image.get("file_name")
+
+            if image_id in image_index:
+                self._warning(
+                    f"{folder.folder_name}: Duplicate image id {image_id}."
+                )
+                continue
+
+            if not isinstance(filename, str):
+                self._warning(
+                    f"{folder.folder_name}: Image id {image_id} has no valid filename."
+                )
+                continue
+
+            if filename in filenames_seen:
+                self._warning(
+                    f"{folder.folder_name}: Duplicate JSON filename '{filename}'."
+                )
+
+            filenames_seen.add(filename)
+            image_index[image_id] = image
 
         # --------------------------------------------------
         # Process every annotation
         # --------------------------------------------------
 
+        annotated_image_ids: set[int] = set()
+
         for item in data["annotations"]:
 
-            image = image_index.get(item.get("image_id"))
+            image_id = item.get("image_id")
+            image = image_index.get(image_id)
 
             if image is None:
 
-                self.logger.warning(
-                    f"Image id {item.get('image_id')} not found."
+                self._warning(
+                    f"{folder.folder_name}: Image id {image_id} not found "
+                    f"for annotation {item.get('id')}."
                 )
 
                 continue
 
+            if image_id in annotated_image_ids:
+                self._warning(
+                    f"{folder.folder_name}: Multiple annotations for image id "
+                    f"{image_id}; annotation {item.get('id')} was skipped."
+                )
+                continue
+
+            annotated_image_ids.add(image_id)
+
             filename = image["file_name"]
 
-            record = self.record_index.get(filename)
+            record_key = self._record_key(folder, filename)
+            record = self.record_index.get(record_key)
 
-            if filename not in self.record_index:
-
-                self.logger.error(
-                    f"Filename '{filename}' not found."
-                )
-
-                for key in list(self.record_index.keys())[:20]:
-                    self.logger.error(f"Key -> '{key}'")
-
-            # self.logger.info(
-            #     f"JSON filename: {filename}"
-            # )
-
-            # self.logger.info(
-            #     f"Found: {record is not None}"
-            # )
-
-            if filename not in self.record_index:
-
-                self.logger.error(
-                    f"Filename '{filename}' not found."
-                )
-
-                for key in list(self.record_index.keys())[:20]:
-                    self.logger.error(f"Key -> '{key}'")
-
-           
             if record is None:
 
-                self.logger.warning(
-                    f"Image not found: {filename}"
+                self._warning(
+                    "Physical image not found for JSON annotation: "
+                    f"{self._format_record_key(record_key)}"
                 )
 
                 continue
@@ -364,8 +412,12 @@ class COCOReader:
             if record.annotation is not None:
 
                 self._warning(
-                    f"{record.filename}: Duplicate annotation."
+                    "Existing annotation was preserved; incoming annotation "
+                    f"{item.get('id')} was skipped for "
+                    f"{self._format_record_key(record_key)}."
                 )
+
+                continue
 
             record.annotation = annotation
 
@@ -404,23 +456,25 @@ class COCOReader:
 
         keypoint_values = item.get("keypoints", [])
 
-        if len(keypoint_values) % 3 != 0:
+        if not self._is_valid_keypoint_payload(keypoint_values):
 
-            self._warning(...)
+            self._warning(
+                f"Invalid keypoints in annotation {item.get('id')}: "
+                "expected a flat [x, y, visibility] * N payload."
+            )
 
             return None
+
+        keypoint_count = len(keypoint_values) // 3
+
+        self._log_unusual_keypoint_cardinality(
+            item.get("id"),
+            keypoint_count,
+        )
 
         keypoints = self._create_keypoints(
             keypoint_values
         )
-
-        if len(keypoints) % 3 != 0:
-
-            self._warning(
-                f"Invalid keypoints in annotation {item.get('id')}"
-            )
-
-            return None
 
         return COCOAnnotation(
 
@@ -450,6 +504,47 @@ class COCOReader:
                     0,
                 )
             ),
+        )
+
+    def _is_valid_keypoint_payload(
+        self,
+        values: Any,
+    ) -> bool:
+        """Validate COCO's flat ``[x, y, visibility] * N`` representation."""
+
+        if not isinstance(values, list) or len(values) % 3 != 0:
+            return False
+
+        for index in range(0, len(values), 3):
+
+            x, y, visibility = values[index:index + 3]
+
+            if not isinstance(x, (int, float)):
+                return False
+
+            if not isinstance(y, (int, float)):
+                return False
+
+            try:
+                KeypointVisibility(visibility)
+            except (TypeError, ValueError):
+                return False
+
+        return True
+
+    def _log_unusual_keypoint_cardinality(
+        self,
+        annotation_id: int | None,
+        keypoint_count: int,
+    ) -> None:
+        """Report, without rejecting, a valid but unseen cardinality."""
+
+        if keypoint_count in self._KNOWN_KEYPOINT_CARDINALITIES:
+            return
+
+        self._warning(
+            f"Annotation {annotation_id}: unusual but valid keypoint "
+            f"cardinality ({keypoint_count})."
         )
 
     def _create_bbox(
@@ -550,4 +645,3 @@ class COCOReader:
 
         self.logger.error(message)
 
-    
