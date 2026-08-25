@@ -1,0 +1,6 @@
+# Reproducible model-architecture environment for Python 3.10
+# These versions were selected and validated for the current project setup.
+torch==2.1.0
+torchvision==0.16.0
+ultralytics==8.4.126
+numpy==1.25.2
