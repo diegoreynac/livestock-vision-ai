@@ -39,9 +39,10 @@ class SplitterTests(unittest.TestCase):
         split = splitter.split(samples)
         total = len(split.train) + len(split.validation) + len(split.test)
         self.assertEqual(total, 20)
-        # Expect roughly 70/15/15 -> 14/3/3 after rounding
+        # Expect 70/20/10 -> 14/4/2 after rounding
         self.assertEqual(len(split.train), 14)
-        self.assertEqual(len(split.validation) + len(split.test), 6)
+        self.assertEqual(len(split.validation), 4)
+        self.assertEqual(len(split.test), 2)
 
     def test_deterministic_with_same_seed(self):
         samples = [make_sample(f"B{i}") for i in range(30)]

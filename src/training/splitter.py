@@ -24,7 +24,7 @@ class DatasetSplitter:
     - Returns empty lists for an empty input collection.
     """
 
-    def __init__(self, train: float = 0.7, validation: float = 0.15, test: float = 0.15, seed: int = 42) -> None:
+    def __init__(self, train: float = 0.7, validation: float = 0.2, test: float = 0.1, seed: int = 42) -> None:
         self._validate_ratios(train, validation, test)
         self.train_ratio = float(train)
         self.validation_ratio = float(validation)
