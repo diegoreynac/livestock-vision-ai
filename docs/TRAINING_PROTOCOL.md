@@ -131,7 +131,7 @@ The protocol requires three disjoint subsets:
 - Validation set: used for model selection, hyperparameter decisions, and early stopping criteria when applicable
 - Test set: held out for final evaluation only
 
-The exact train/validation/test percentages are currently TBD and must be defined before the formal experimental campaign. The tractable decision is not the exact numerical ratio alone, but the requirement that the split be leakage-safe and suitable for repeated architecture comparison.
+The dataset is split into 70% training, 20% validation, and 10% test subsets at the animal level. This ratio is applied consistently across architecture experiments, while preserving leakage safety and keeping the test set isolated from model selection.
 
 ### 4.3 Split constraints
 
@@ -246,17 +246,27 @@ The project explicitly requires the use of data augmentation. In this task, augm
 
 Augmentation should be viewed as a regularization and robustness tool, not as a replacement for clean data collection or proper labeling.
 
-### 7.1 Augmentation categories likely to be considered
+### 7.1 Augmentation categories
 
-Potential augmentations include:
+The augmentation policy distinguishes between geometric and photometric transformations.
 
-- horizontal flip where semantically valid
-- small rotations
-- translation
-- scaling
-- brightness and contrast adjustments
-- mild crop/resize operations
-- noise or blur where justified
+Candidate geometric transformations include:
+
+- horizontal flip
+- small rotation within a bounded range (for example, +/-15 degrees)
+- moderate zoom / scale changes
+- resize as a deterministic spatial preprocessing step
+
+Candidate photometric transformations include:
+
+- brightness adjustment
+- contrast adjustment
+- color / saturation adjustment
+- Gaussian noise
+- grayscale conversion
+- blur
+
+The 90-degree rotation is not part of the default augmentation set for cattle imagery because such a transform can produce physically unrealistic animal poses and is therefore inconsistent with the project's constraint on biological plausibility.
 
 ### 7.2 Augmentation rules
 
@@ -269,16 +279,22 @@ Not every augmentation is appropriate for every task or every image type. Each a
 
 For side/rear livestock imagery, augmentation must not change the underlying meaning of the sample. For example:
 
-- horizontal flipping may be acceptable only if the annotation semantics remain valid after transformation;
+- horizontal flipping may be acceptable only if annotation semantics remain valid after transformation;
 - excessive cropping may remove biologically relevant body structure;
 - extreme rotations may produce unrealistic animal poses;
 - augmentation that destroys the side/rear pairing relationship is not acceptable unless the experiment explicitly defines and documents such a change.
 
-Therefore, the protocol requires that any augmentation affecting geometry must also update bounding boxes and related label geometry consistently.
+Important protocol requirement:
+
+- Geometric transformations affect image coordinates and therefore must eventually update spatial annotations such as bounding boxes and keypoints so that the transformed image and its labels remain aligned.
+- Photometric transformations change appearance but do not change object geometry. They must not modify spatial annotations.
+- No augmentation is activated by default; each transform must be explicitly enabled in the configuration used for a training run.
+
+This rule applies regardless of whether the augmentation is implemented in the preprocessing stage, a dataset wrapper, or future DataLoader logic. The requirement is architectural: any later integration with DataLoader or sample collators must preserve the same annotation update contract.
 
 ### 7.3 Augmentation policy status
 
-The exact augmentation list, probabilities, and magnitudes remain TBD. They must be defined before the final experimental campaign and then applied consistently across the architecture families. The protocol may allow a small set of controlled augmentation experiments, but the chosen configuration must be documented and not changed silently during final evaluation.
+The final augmentation list, probabilities, and magnitudes are intentionally configurable and must be selected before the final experimental campaign. They must then be applied consistently across the architecture families. The protocol may allow a small set of controlled augmentation experiments, but the chosen configuration must be documented and not changed silently during final evaluation.
 
 ---
 
@@ -722,6 +738,7 @@ The following decisions are already established by the project and are therefore
 The following decisions can be defined now within the common protocol without inventing results:
 
 - The common pipeline will operate on paired side/rear inputs.
+- The common split ratio will be 70% training, 20% validation, and 10% test.
 - All architectures must be evaluated under a shared dataset and split logic.
 - All experiments must report the same core metrics and complexity measures.
 - All experiments must use a leakage-safe animal-level split when possible.
@@ -732,7 +749,6 @@ The following decisions can be defined now within the common protocol without in
 
 The following details remain TBD and must be finalized through controlled experiments before the final evaluation campaign:
 
-- exact train/validation/test percentages
 - exact input resolution
 - exact augmentation list and probabilities
 - exact loss functions
