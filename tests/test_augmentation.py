@@ -211,6 +211,58 @@ class TestAugmentation(unittest.TestCase):
         expected_value = (128 / 255.0 - 0.5) / 0.25
         self.assertTrue(np.allclose(out, expected_value, atol=1e-6))
 
+    def test_zoom_scale_one_preserves_annotations(self):
+        img = np.zeros((10, 20, 3), dtype=np.uint8)
+        annotations = {
+            "boxes": np.array([[2, 3, 8, 9]], dtype=np.float32),
+            "keypoints": np.array([[[4, 5], [12, 7]]], dtype=np.float32),
+        }
+        cfg = AugmentationConfig(enable_zoom=True, zoom_range=(1.0, 1.0), zoom_prob=1.0)
+        training_preprocess(img, cfg, seed=1, annotations=annotations)
+        self.assertTrue(np.allclose(annotations["boxes"], np.array([[2, 3, 8, 9]], dtype=np.float32), atol=1e-6))
+        self.assertTrue(
+            np.allclose(annotations["keypoints"], np.array([[[4, 5], [12, 7]]], dtype=np.float32), atol=1e-6)
+        )
+
+    def test_zoom_in_updates_bbox_and_keypoints_with_center_crop(self):
+        img = np.zeros((10, 20, 3), dtype=np.uint8)
+        annotations = {
+            "boxes": np.array([[2, 2, 8, 6]], dtype=np.float32),
+            "keypoints": np.array([[[2, 2], [8, 6]]], dtype=np.float32),
+        }
+        cfg = AugmentationConfig(enable_zoom=True, zoom_range=(1.5, 1.5), zoom_prob=1.0)
+        training_preprocess(img, cfg, seed=1, annotations=annotations)
+        expected_boxes = np.array([[-2.0, 1.0, 7.0, 7.0]], dtype=np.float32)
+        expected_keypoints = np.array([[[-2.0, 1.0], [7.0, 7.0]]], dtype=np.float32)
+        self.assertTrue(np.allclose(annotations["boxes"], expected_boxes, atol=1e-6))
+        self.assertTrue(np.allclose(annotations["keypoints"], expected_keypoints, atol=1e-6))
+
+    def test_zoom_out_updates_bbox_and_keypoints_with_center_padding(self):
+        img = np.zeros((10, 20, 3), dtype=np.uint8)
+        annotations = {
+            "boxes": np.array([[2, 2, 8, 6]], dtype=np.float32),
+            "keypoints": np.array([[[2, 2], [8, 6]]], dtype=np.float32),
+        }
+        cfg = AugmentationConfig(enable_zoom=True, zoom_range=(0.5, 0.5), zoom_prob=1.0)
+        training_preprocess(img, cfg, seed=1, annotations=annotations)
+        expected_boxes = np.array([[6.0, 3.0, 9.0, 5.0]], dtype=np.float32)
+        expected_keypoints = np.array([[[6.0, 3.0], [9.0, 5.0]]], dtype=np.float32)
+        self.assertTrue(np.allclose(annotations["boxes"], expected_boxes, atol=1e-6))
+        self.assertTrue(np.allclose(annotations["keypoints"], expected_keypoints, atol=1e-6))
+
+    def test_zoom_scale_applies_same_spatial_transform_to_bbox_and_keypoints(self):
+        img = np.zeros((12, 24, 3), dtype=np.uint8)
+        annotations = {
+            "boxes": np.array([[4, 3, 12, 9]], dtype=np.float32),
+            "keypoints": np.array([[[4, 3], [12, 9]]], dtype=np.float32),
+        }
+        cfg = AugmentationConfig(enable_zoom=True, zoom_range=(1.5, 1.5), zoom_prob=1.0)
+        training_preprocess(img, cfg, seed=1, annotations=annotations)
+        box = annotations["boxes"][0]
+        keypoints = annotations["keypoints"][0]
+        self.assertTrue(np.allclose(keypoints[0], box[:2], atol=1e-6))
+        self.assertTrue(np.allclose(keypoints[1], box[2:], atol=1e-6))
+
 
 if __name__ == "__main__":
     unittest.main()
