@@ -147,16 +147,43 @@ def _update_boxes_for_rotation(boxes: np.ndarray, height: int, width: int, angle
     return np.column_stack((x0, y0, x1, y1))
 
 
-def _update_boxes_for_zoom(boxes: np.ndarray, scale_x: float, scale_y: float) -> np.ndarray:
+def _update_boxes_for_zoom(boxes: np.ndarray, scale_x: float, scale_y: float, offset_x: float = 0.0, offset_y: float = 0.0) -> np.ndarray:
     out = boxes.copy()
-    out[:, 0] *= scale_x
-    out[:, 2] *= scale_x
-    out[:, 1] *= scale_y
-    out[:, 3] *= scale_y
+    out[:, 0] = out[:, 0] * scale_x + offset_x
+    out[:, 2] = out[:, 2] * scale_x + offset_x
+    out[:, 1] = out[:, 1] * scale_y + offset_y
+    out[:, 3] = out[:, 3] * scale_y + offset_y
     return out
 
 
-def update_spatial_annotations(annotations: Any, *, transform_name: str, source_shape: Tuple[int, int], target_shape: Tuple[int, int], angle_deg: float = 0.0) -> Any:
+def _center_zoom_transform(height: int, width: int, scale: float) -> Tuple[float, float, float, float]:
+    """Compute the exact affine transform applied to coordinates by ``_center_zoom``.
+
+    The transform is ``x' = x * scale_x + offset_x`` and ``y' = y * scale_y + offset_y``.
+    This mirrors ``_center_zoom`` exactly, including its centered crop/pad behavior and
+    integer ``// 2`` offset computation, so annotations stay consistent with the image.
+    """
+    new_h = max(1, int(round(height * scale)))
+    new_w = max(1, int(round(width * scale)))
+    scale_x = scale
+    scale_y = scale
+    if new_h >= height and new_w >= width:
+        y0 = (new_h - height) // 2
+        x0 = (new_w - width) // 2
+        offset_x = -float(x0)
+        offset_y = -float(y0)
+    elif new_h <= height and new_w <= width:
+        y0 = (height - new_h) // 2
+        x0 = (width - new_w) // 2
+        offset_x = float(x0)
+        offset_y = float(y0)
+    else:
+        offset_x = 0.0
+        offset_y = 0.0
+    return scale_x, scale_y, offset_x, offset_y
+
+
+def update_spatial_annotations(annotations: Any, *, transform_name: str, source_shape: Tuple[int, int], target_shape: Tuple[int, int], angle_deg: float = 0.0, zoom_scale: Optional[float] = None) -> Any:
     """Apply a single geometric transform to spatial annotations.
 
     This helper is intentionally compositional: the caller may apply multiple geometric
@@ -180,9 +207,9 @@ def update_spatial_annotations(annotations: Any, *, transform_name: str, source_
         elif transform_name == "small_rotation":
             arr = _update_boxes_for_rotation(arr, source_shape[0], source_shape[1], angle_deg)
         elif transform_name == "zoom_scale":
-            scale_x = target_shape[1] / max(source_shape[1], 1)
-            scale_y = target_shape[0] / max(source_shape[0], 1)
-            arr = _update_boxes_for_zoom(arr, scale_x, scale_y)
+            scale = zoom_scale if zoom_scale is not None else target_shape[0] / max(source_shape[0], 1)
+            scale_x, scale_y, offset_x, offset_y = _center_zoom_transform(source_shape[0], source_shape[1], scale)
+            arr = _update_boxes_for_zoom(arr, scale_x, scale_y, offset_x, offset_y)
         annotations["boxes"] = arr
         if "bboxes" in annotations:
             annotations["bboxes"] = arr
@@ -206,11 +233,11 @@ def update_spatial_annotations(annotations: Any, *, transform_name: str, source_
             rotated = _rotate_point_matrix(points, angle_deg, cx, cy)
             arr = rotated.reshape(keypoints.shape)
         elif transform_name == "zoom_scale":
-            scale_x = target_shape[1] / max(source_shape[1], 1)
-            scale_y = target_shape[0] / max(source_shape[0], 1)
+            scale = zoom_scale if zoom_scale is not None else target_shape[0] / max(source_shape[0], 1)
+            scale_x, scale_y, offset_x, offset_y = _center_zoom_transform(source_shape[0], source_shape[1], scale)
             arr = arr.copy()
-            arr[..., 0] *= scale_x
-            arr[..., 1] *= scale_y
+            arr[..., 0] = arr[..., 0] * scale_x + offset_x
+            arr[..., 1] = arr[..., 1] * scale_y + offset_y
         annotations["keypoints"] = arr
 
     history = annotations.setdefault("_geometric_transform_history", [])
@@ -490,6 +517,7 @@ def training_preprocess(
                 transform_name="zoom_scale",
                 source_shape=source_shape,
                 target_shape=img.shape[:2],
+                zoom_scale=scale,
             )
         current_shape = img.shape[:2]
 
