@@ -128,17 +128,16 @@ def _rotate_point_matrix(points: np.ndarray, angle_deg: float, cx: float, cy: fl
 
 
 def _update_boxes_for_rotation(boxes: np.ndarray, height: int, width: int, angle_deg: float) -> np.ndarray:
-    cx, cy = width / 2.0, height / 2.0
-    corners = np.array(
-        [
-            [boxes[:, 0], boxes[:, 1]],
-            [boxes[:, 2], boxes[:, 1]],
-            [boxes[:, 0], boxes[:, 3]],
-            [boxes[:, 2], boxes[:, 3]],
-        ],
-        dtype=np.float32,
-    )
-    corners = np.moveaxis(corners, 0, 1).reshape((-1, 2))
+    cx, cy = (width - 1) / 2.0, (height - 1) / 2.0
+    corners = np.stack(
+        (
+            np.column_stack((boxes[:, 0], boxes[:, 1])),
+            np.column_stack((boxes[:, 2], boxes[:, 1])),
+            np.column_stack((boxes[:, 0], boxes[:, 3])),
+            np.column_stack((boxes[:, 2], boxes[:, 3])),
+        ),
+        axis=1,
+    ).reshape((-1, 2))
     rotated = _rotate_point_matrix(corners, angle_deg, cx, cy)
     x0 = rotated[:, 0].reshape((-1, 4)).min(axis=1)
     y0 = rotated[:, 1].reshape((-1, 4)).min(axis=1)
@@ -227,8 +226,8 @@ def update_spatial_annotations(annotations: Any, *, transform_name: str, source_
             arr = arr.copy()
             arr[..., 0] = target_shape[1] - arr[..., 0]
         elif transform_name == "small_rotation":
-            cx = source_shape[1] / 2.0
-            cy = source_shape[0] / 2.0
+            cx = (source_shape[1] - 1) / 2.0
+            cy = (source_shape[0] - 1) / 2.0
             points = arr.reshape((-1, 2))
             rotated = _rotate_point_matrix(points, angle_deg, cx, cy)
             arr = rotated.reshape(keypoints.shape)
@@ -341,6 +340,12 @@ def _validate_config(config: AugmentationConfig, channels: int):
     if config.normalize_std is not None:
         if len(config.normalize_std) != channels:
             raise ValueError("normalize_std length must match image channels")
+    if (config.normalize_mean is None) != (config.normalize_std is None):
+        raise ValueError("normalize_mean and normalize_std must be provided together")
+    if config.normalize_std is not None and not all(
+        np.isfinite(value) and value > 0.0 for value in config.normalize_std
+    ):
+        raise ValueError("normalize_std values must be finite and greater than zero")
 
 
 def _apply_gaussian_blur(img: np.ndarray, sigma: float) -> np.ndarray:

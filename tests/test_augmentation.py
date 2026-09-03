@@ -211,6 +211,69 @@ class TestAugmentation(unittest.TestCase):
         expected_value = (128 / 255.0 - 0.5) / 0.25
         self.assertTrue(np.allclose(out, expected_value, atol=1e-6))
 
+    def test_incomplete_normalization_configuration_is_rejected(self):
+        for cfg in (
+            AugmentationConfig(normalize_mean=(0.5, 0.5, 0.5)),
+            AugmentationConfig(normalize_std=(0.25, 0.25, 0.25)),
+        ):
+            with self.assertRaisesRegex(ValueError, "provided together"):
+                eval_preprocess(self.image, cfg)
+
+    def test_invalid_normalization_standard_deviations_are_rejected(self):
+        for std in ((0.0, 0.25, 0.25), (-0.1, 0.25, 0.25), (np.inf, 0.25, 0.25)):
+            cfg = AugmentationConfig(
+                normalize_mean=(0.5, 0.5, 0.5),
+                normalize_std=std,
+            )
+            with self.assertRaisesRegex(ValueError, "finite and greater than zero"):
+                eval_preprocess(self.image, cfg)
+
+    def test_rotation_annotations_use_image_rotation_center(self):
+        img = np.zeros((5, 7, 3), dtype=np.uint8)
+        landmark = (1, 1)
+        img[landmark[1], landmark[0]] = 255
+        annotations = {"boxes": np.array([[0.5, 0.5, 1.5, 1.5]], dtype=np.float32)}
+        cfg = AugmentationConfig(
+            enable_rotation=True,
+            rotation_range=(90.0, 90.0),
+            rotation_prob=1.0,
+        )
+
+        rotated = training_preprocess(img, cfg, seed=1, annotations=annotations)
+
+        center_x = (img.shape[1] - 1) / 2.0
+        center_y = (img.shape[0] - 1) / 2.0
+
+        def rotate_point(x, y):
+            return center_x - (y - center_y), center_y + (x - center_x)
+
+        expected_landmark = rotate_point(*landmark)
+        expected_corners = [
+            rotate_point(0.5, 0.5),
+            rotate_point(1.5, 0.5),
+            rotate_point(0.5, 1.5),
+            rotate_point(1.5, 1.5),
+        ]
+        expected_bbox = np.array(
+            [[
+                min(point[0] for point in expected_corners),
+                min(point[1] for point in expected_corners),
+                max(point[0] for point in expected_corners),
+                max(point[1] for point in expected_corners),
+            ]],
+            dtype=np.float32,
+        )
+        transformed_landmark = np.unravel_index(
+            np.argmax(rotated[:, :, 0]), rotated[:, :, 0].shape
+        )[::-1]
+
+        self.assertEqual(transformed_landmark, tuple(int(value) for value in expected_landmark))
+        self.assertTrue(np.allclose(annotations["boxes"], expected_bbox, atol=1e-6))
+        self.assertGreaterEqual(transformed_landmark[0], expected_bbox[0, 0])
+        self.assertLess(transformed_landmark[0], expected_bbox[0, 2])
+        self.assertGreaterEqual(transformed_landmark[1], expected_bbox[0, 1])
+        self.assertLess(transformed_landmark[1], expected_bbox[0, 3])
+
     def test_zoom_scale_one_preserves_annotations(self):
         img = np.zeros((10, 20, 3), dtype=np.uint8)
         annotations = {
