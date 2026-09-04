@@ -208,11 +208,19 @@ class DualViewTorchModel(BaseModel, nn.Module):
             return feats
 
     def forward(self, side: Any, rear: Any, **kwargs: Any) -> ModelOutput:
-        """Perform a PyTorch forward pass.
+        """Perform a differentiable PyTorch forward pass.
 
         Inputs are expected to be torch.Tensor with shape (B, C, H, W) or
         convertible to such. The implementation runs on CPU by default but will
         use default device of provided tensors.
+
+        Returns a ModelOutput whose fields are the raw head tensors so the
+        autograd graph is preserved for gradient-based training:
+        - bbox: Tensor of shape (B, 4)
+        - sex: Tensor of shape (B, 2) with sex logits
+        - weight: Tensor of shape (B, 1)
+
+        Use predict() for inference-friendly Python values.
         """
         # Accept raw tensors or convert numpy-like arrays here if necessary
         if not isinstance(side, torch.Tensor) or not isinstance(rear, torch.Tensor):
@@ -229,8 +237,24 @@ class DualViewTorchModel(BaseModel, nn.Module):
         sex_logits = self.sex_head(fused)  # (B,2)
         weight_out = self.weight_head(fused)  # (B,1)
 
-        # For interface compatibility, convert single-batch tensors to plain Python
-        # scalars/lists. Keep batch dimension if B>1.
+        return ModelOutput(bbox=bbox, sex=sex_logits, weight=weight_out)
+
+    def predict(self, side: Any, rear: Any, **kwargs: Any) -> ModelOutput:
+        was_training = self.training
+        try:
+            self.eval()
+            with torch.no_grad():
+                out = self.forward(side, rear, **kwargs)
+        finally:
+            if was_training:
+                self.train()
+
+        bbox = out.bbox
+        sex_logits = out.sex
+        weight_out = out.weight
+
+        # Convert tensors to plain Python values for the inference interface.
+        # Keep single-sample outputs unbatched; use lists when B>1.
         if bbox.shape[0] == 1:
             bbox_val = tuple(float(x) for x in bbox.squeeze(0).tolist())
             sex_idx = int(sex_logits.argmax(dim=1).item())
@@ -242,16 +266,6 @@ class DualViewTorchModel(BaseModel, nn.Module):
             weight_val = [float(x) for x in weight_out.flatten().tolist()]
 
         return ModelOutput(bbox=bbox_val, sex=sex_val, weight=weight_val)
-
-    def predict(self, side: Any, rear: Any, **kwargs: Any) -> ModelOutput:
-        was_training = self.training
-        try:
-            self.eval()
-            with torch.no_grad():
-                return self.forward(side, rear, **kwargs)
-        finally:
-            if was_training:
-                self.train()
 
     def count_parameters(self) -> int:
         return sum(p.numel() for p in self.parameters())
