@@ -43,6 +43,7 @@ except Exception:
 
 from src.models.base import BaseModel
 from src.models.output import ModelOutput
+from src.training.torch_dataset import InputMode
 
 
 def _global_pool_flat(x: torch.Tensor) -> torch.Tensor:
@@ -57,9 +58,14 @@ class DualViewTorchModel(BaseModel, nn.Module):
     - architecture: 'mobilenet', 'efficientnet' or 'yolo'
     - variant: variant string passed to the backbone selection
     - share_backbone: if True, the side and rear views share backbone weights
+    - input_mode: InputMode selecting the forward()/predict() input contract.
+      SIDE_REAR (default) preserves the existing dual-view behavior; SIDE and
+      REAR are single-view contracts whose architecture support is implemented
+      in the next task.
 
-    The forward method accepts two image tensors: side and rear with shape
-    (B, C, H, W) and returns a ModelOutput with framework-agnostic values.
+    The forward method accepts image tensors with shape (B, C, H, W) matching
+    the configured input mode and returns a ModelOutput with
+    framework-agnostic values.
     """
 
     def __init__(
@@ -67,11 +73,18 @@ class DualViewTorchModel(BaseModel, nn.Module):
         architecture: str = "mobilenet",
         variant: str = "default",
         share_backbone: bool = False,
+        input_mode: InputMode = InputMode.SIDE_REAR,
     ) -> None:
         nn.Module.__init__(self)
+        if not isinstance(input_mode, InputMode):
+            raise TypeError(
+                "input_mode must be an InputMode instance; "
+                f"got {type(input_mode).__name__}: {input_mode!r}."
+            )
         self.architecture = architecture
         self.variant = variant
         self.share_backbone = share_backbone
+        self.input_mode = input_mode
 
         # instantiate backbones
         if architecture == "mobilenet":
@@ -207,12 +220,23 @@ class DualViewTorchModel(BaseModel, nn.Module):
                 feats = _global_pool_flat(feats)
             return feats
 
-    def forward(self, side: Any, rear: Any, **kwargs: Any) -> ModelOutput:
+    def forward(self, side: Any = None, rear: Any = None, **kwargs: Any) -> ModelOutput:
         """Perform a differentiable PyTorch forward pass.
 
-        Inputs are expected to be torch.Tensor with shape (B, C, H, W) or
-        convertible to such. The implementation runs on CPU by default but will
-        use default device of provided tensors.
+        The number of image tensors must match ``self.input_mode`` exactly:
+        - InputMode.SIDE: exactly one tensor, the side view.
+        - InputMode.REAR: exactly one tensor, the rear view.
+        - InputMode.SIDE_REAR: exactly two tensors, side and rear.
+
+        A TypeError is raised when the input contract is violated; inputs are
+        never silently ignored and a missing view is never substituted. SIDE
+        and REAR currently raise NotImplementedError after contract validation
+        because the fusion architecture is still dual-view-only; single-view
+        architecture support will be implemented in the next task.
+
+        Inputs are expected to be torch.Tensor with shape (B, C, H, W). The
+        implementation runs on CPU by default but will use the default device
+        of the provided tensors.
 
         Returns a ModelOutput whose fields are the raw head tensors so the
         autograd graph is preserved for gradient-based training:
@@ -222,6 +246,38 @@ class DualViewTorchModel(BaseModel, nn.Module):
 
         Use predict() for inference-friendly Python values.
         """
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected forward() keyword argument(s): {unexpected}.")
+
+        if self.input_mode is InputMode.SIDE_REAR:
+            if side is None or rear is None:
+                raise TypeError(
+                    "InputMode.SIDE_REAR requires exactly two tensors: forward(side, rear)."
+                )
+            return self._forward_dual_view(side, rear)
+
+        # Single-view modes consume exactly one image tensor.
+        views = [view for view in (side, rear) if view is not None]
+        if len(views) != 1:
+            raise TypeError(
+                f"InputMode.{self.input_mode.name} requires exactly one tensor; "
+                f"got {len(views)}."
+            )
+        if not isinstance(views[0], torch.Tensor):
+            raise TypeError(
+                f"InputMode.{self.input_mode.name} input must be a torch.Tensor; "
+                f"got {type(views[0]).__name__}."
+            )
+        raise NotImplementedError(
+            f"InputMode.{self.input_mode.name} single-view forward is not implemented "
+            "yet: the current fusion architecture requires both side and rear feature "
+            "vectors. Single-view architecture support will be implemented in the "
+            "next task."
+        )
+
+    def _forward_dual_view(self, side: Any, rear: Any) -> ModelOutput:
+        """Dual-view forward path (InputMode.SIDE_REAR)."""
         # Accept raw tensors or convert numpy-like arrays here if necessary
         if not isinstance(side, torch.Tensor) or not isinstance(rear, torch.Tensor):
             raise TypeError("side and rear inputs must be torch.Tensor for DualViewTorchModel")
@@ -239,7 +295,7 @@ class DualViewTorchModel(BaseModel, nn.Module):
 
         return ModelOutput(bbox=bbox, sex=sex_logits, weight=weight_out)
 
-    def predict(self, side: Any, rear: Any, **kwargs: Any) -> ModelOutput:
+    def predict(self, side: Any = None, rear: Any = None, **kwargs: Any) -> ModelOutput:
         was_training = self.training
         try:
             self.eval()

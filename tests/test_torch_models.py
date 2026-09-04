@@ -6,6 +6,7 @@ import tempfile
 from src.models.torch_models import DualViewTorchModel
 from src.models.output import ModelOutput
 from src.models.base import BaseModel
+from src.training.torch_dataset import InputMode
 
 
 class TestTorchModels(unittest.TestCase):
@@ -75,6 +76,17 @@ class TestTorchModels(unittest.TestCase):
         self.assertEqual(tuple(out.sex.shape), (1, 2))
         self.assertEqual(tuple(out.weight.shape), (1, 1))
 
+    def test_forward_uses_legacy_bbox_until_per_view_migration(self):
+        # Transitional contract: the model has not migrated to per-view boxes
+        # yet, so SIDE_REAR populates the legacy bbox/sex/weight fields and
+        # leaves bbox_side/bbox_rear unset. Update this test when the model
+        # adopts the per-view output contract.
+        model = DualViewTorchModel(architecture="mobilenet", variant="small", share_backbone=True)
+        out = model(self.side, self.rear)
+        self.assertIsInstance(out.bbox, torch.Tensor)
+        self.assertIsNone(out.bbox_side)
+        self.assertIsNone(out.bbox_rear)
+
     def test_forward_outputs_require_grad(self):
         model = DualViewTorchModel(architecture="mobilenet", variant="small", share_backbone=True)
         side = self.side.clone().requires_grad_(True)
@@ -130,6 +142,110 @@ class TestTorchModels(unittest.TestCase):
         model.eval()
         model.predict(self.side, self.rear)
         self.assertFalse(model.training)
+
+
+class TestInputModeContract(unittest.TestCase):
+    """Input-mode contract tests for DualViewTorchModel.
+
+    The single-view (SIDE/REAR) architecture is intentionally not implemented
+    yet; these tests pin the input contract only.
+    """
+
+    def setUp(self):
+        self.side = torch.randn(1, 3, 224, 224)
+        self.rear = torch.randn(1, 3, 224, 224)
+
+    def _make_model(self, input_mode):
+        return DualViewTorchModel(
+            architecture="mobilenet",
+            variant="small",
+            share_backbone=True,
+            input_mode=input_mode,
+        )
+
+    def test_each_input_mode_can_be_constructed(self):
+        for mode in (InputMode.SIDE, InputMode.REAR, InputMode.SIDE_REAR):
+            with self.subTest(input_mode=mode):
+                model = self._make_model(mode)
+                self.assertIs(model.input_mode, mode)
+
+    def test_default_input_mode_is_side_rear(self):
+        model = DualViewTorchModel(architecture="mobilenet", variant="small", share_backbone=True)
+        self.assertIs(model.input_mode, InputMode.SIDE_REAR)
+
+    def test_invalid_input_mode_is_rejected(self):
+        for bad_mode in ("side", "side_rear", None, 0, ["side"]):
+            with self.subTest(input_mode=bad_mode):
+                with self.assertRaises(TypeError):
+                    self._make_model(bad_mode)
+
+    def test_side_mode_accepts_one_image_but_architecture_pending(self):
+        model = self._make_model(InputMode.SIDE)
+        with self.assertRaisesRegex(NotImplementedError, "single-view"):
+            model(self.side)
+
+    def test_side_mode_rejects_wrong_input_contract(self):
+        model = self._make_model(InputMode.SIDE)
+        with self.assertRaises(TypeError):
+            model()  # zero inputs
+        with self.assertRaises(TypeError):
+            model(self.side, self.rear)  # two inputs
+        with self.assertRaises(TypeError):
+            model("not-a-tensor")  # single input, wrong type
+
+    def test_rear_mode_accepts_one_image_but_architecture_pending(self):
+        model = self._make_model(InputMode.REAR)
+        with self.assertRaisesRegex(NotImplementedError, "single-view"):
+            model(self.rear)  # single positional tensor
+        with self.assertRaisesRegex(NotImplementedError, "single-view"):
+            model(rear=self.rear)  # keyword form
+
+    def test_rear_mode_rejects_wrong_input_contract(self):
+        model = self._make_model(InputMode.REAR)
+        with self.assertRaises(TypeError):
+            model()  # zero inputs
+        with self.assertRaises(TypeError):
+            model(self.side, self.rear)  # two inputs
+        with self.assertRaises(TypeError):
+            model(self.rear, unexpected=True)  # unexpected kwarg
+
+    def test_side_rear_accepts_side_and_rear(self):
+        model = self._make_model(InputMode.SIDE_REAR)
+        out = model(self.side, self.rear)
+        self.assertIsInstance(out, ModelOutput)
+
+    def test_side_rear_rejects_wrong_input_contract(self):
+        model = self._make_model(InputMode.SIDE_REAR)
+        with self.assertRaises(TypeError):
+            model(self.side)  # missing rear view
+        with self.assertRaises(TypeError):
+            model(rear=self.rear)  # missing side view
+        with self.assertRaises(TypeError):
+            model(self.side, self.rear, unexpected=True)  # unexpected kwarg
+        with self.assertRaises(TypeError):
+            model(self.side, "not-a-tensor")  # wrong type
+
+    def test_side_rear_forward_output_shapes(self):
+        model = self._make_model(InputMode.SIDE_REAR)
+        side = torch.randn(2, 3, 224, 224)
+        rear = torch.randn(2, 3, 224, 224)
+        out = model(side, rear)
+        self.assertEqual(tuple(out.bbox.shape), (2, 4))
+        self.assertEqual(tuple(out.sex.shape), (2, 2))
+        self.assertEqual(tuple(out.weight.shape), (2, 1))
+
+    def test_forward_remains_differentiable(self):
+        model = self._make_model(InputMode.SIDE_REAR)
+        model.train()
+        side = self.side.clone().requires_grad_(True)
+        rear = self.rear.clone().requires_grad_(True)
+        out = model(side, rear)
+        loss = out.bbox.sum() + out.sex.sum() + out.weight.sum()
+        loss.backward()
+        self.assertIsNotNone(side.grad)
+        self.assertIsNotNone(rear.grad)
+        self.assertIsNotNone(model.fusion[0].weight.grad)
+        self.assertTrue(torch.isfinite(model.fusion[0].weight.grad).all())
 
 
 if __name__ == "__main__":
