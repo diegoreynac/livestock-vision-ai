@@ -76,6 +76,17 @@ class TestTorchModels(unittest.TestCase):
         self.assertEqual(tuple(out.sex.shape), (1, 2))
         self.assertEqual(tuple(out.weight.shape), (1, 1))
 
+    def test_forward_uses_legacy_bbox_until_per_view_migration(self):
+        # Transitional contract: the model has not migrated to per-view boxes
+        # yet, so SIDE_REAR populates the legacy bbox/sex/weight fields and
+        # leaves bbox_side/bbox_rear unset. Update this test when the model
+        # adopts the per-view output contract.
+        model = DualViewTorchModel(architecture="mobilenet", variant="small", share_backbone=True)
+        out = model(self.side, self.rear)
+        self.assertIsInstance(out.bbox, torch.Tensor)
+        self.assertIsNone(out.bbox_side)
+        self.assertIsNone(out.bbox_rear)
+
     def test_forward_outputs_require_grad(self):
         model = DualViewTorchModel(architecture="mobilenet", variant="small", share_backbone=True)
         side = self.side.clone().requires_grad_(True)
