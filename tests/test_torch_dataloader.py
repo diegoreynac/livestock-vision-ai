@@ -87,12 +87,31 @@ class TestTorchDataLoader(unittest.TestCase):
             iter(create_dataloader(self._dataset(InputMode.SIDE_REAR), batch_size=2))
         )
 
-        self.assertEqual(batch["image"].shape, (2, 6, 4, 6))
+        self.assertEqual(batch["side_image"].shape, (2, 3, 4, 6))
+        self.assertEqual(batch["rear_image"].shape, (2, 3, 4, 6))
+
+        expected_side_pixel = torch.tensor(
+            [10, 20, 30],
+            dtype=torch.float32,
+        ) / 255.0
+
+        expected_rear_pixel = torch.tensor(
+            [40, 50, 60],
+            dtype=torch.float32,
+        ) / 255.0
+
         self.assertTrue(
-            torch.allclose(batch["image"][0, :3, 0, 0], torch.tensor([10, 20, 30]) / 255)
+            torch.allclose(
+                batch["side_image"][0, :, 0, 0],
+                expected_side_pixel,
+            )
         )
+
         self.assertTrue(
-            torch.allclose(batch["image"][0, 3:, 0, 0], torch.tensor([40, 50, 60]) / 255)
+            torch.allclose(
+                batch["rear_image"][0, :, 0, 0],
+                expected_rear_pixel,
+            )
         )
 
     def test_shuffle_false_preserves_sample_order(self):

@@ -79,11 +79,65 @@ class TestTorchLivestockDataset(unittest.TestCase):
             result["bbox"], torch.tensor([1 / 6, 1 / 4, 3 / 6, 3 / 4])
         ))
 
-    def test_side_rear_channel_order(self):
-        image = self._dataset(InputMode.SIDE_REAR)[0]["image"]
-        self.assertEqual(image.shape, (6, 4, 6))
-        self.assertTrue(torch.allclose(image[:3, 0, 0], torch.tensor([10, 20, 30]) / 255))
-        self.assertTrue(torch.allclose(image[3:, 0, 0], torch.tensor([40, 50, 60]) / 255))
+    def test_side_rear_view_channel_order(self):
+        result = self._dataset(InputMode.SIDE_REAR)[0]
+
+        self.assertEqual(
+            set(result.keys()),
+            {
+                "side_image",
+                "rear_image",
+                "bbox_side",
+                "bbox_rear",
+                "weight",
+                "animal_id",
+            },
+        )
+
+        # Each view remains an independent RGB image.
+        self.assertEqual(result["side_image"].shape, (3, 4, 6))
+        self.assertEqual(result["rear_image"].shape, (3, 4, 6))
+
+        # OpenCV loads BGR images, while the dataset converts them to RGB.
+        # Side image was written as BGR=(30, 20, 10), therefore RGB=(10, 20, 30).
+        expected_side_pixel = torch.tensor([10, 20, 30], dtype=torch.float32) / 255.0
+
+        # Rear image was written as BGR=(60, 50, 40), therefore RGB=(40, 50, 60).
+        expected_rear_pixel = torch.tensor([40, 50, 60], dtype=torch.float32) / 255.0
+
+        self.assertTrue(
+            torch.allclose(
+                result["side_image"][:, 0, 0],
+                expected_side_pixel,
+            )
+        )
+
+        self.assertTrue(
+            torch.allclose(
+                result["rear_image"][:, 0, 0],
+                expected_rear_pixel,
+            )
+        )
+
+        # Side and Rear keep their own bounding boxes.
+        expected_bbox = torch.tensor(
+            [1 / 6, 1 / 4, 3 / 6, 3 / 4],
+            dtype=torch.float32,
+        )
+
+        self.assertTrue(
+            torch.allclose(
+                result["bbox_side"],
+                expected_bbox,
+            )
+        )
+
+        self.assertTrue(
+            torch.allclose(
+                result["bbox_rear"],
+                expected_bbox,
+            )
+        )
 
     def test_side_rear_geometric_transform_is_consistent(self):
         sample = TrainingSample(
@@ -129,7 +183,11 @@ class TestTorchLivestockDataset(unittest.TestCase):
             )
             result = dataset[0]
 
-        self.assertEqual(result["image"].shape, (6, 8, 12))
+        self.assertEqual(result["side_image"].shape, (3, 8, 12))
+        self.assertEqual(result["rear_image"].shape, (3, 8, 12))
+
+        self.assertEqual(result["bbox_side"].shape, (4,))
+        self.assertEqual(result["bbox_rear"].shape, (4,))
         self.assertEqual(len(transformed_boxes), 2)
         self.assertEqual(seeds, [0, 0])
         expected_boxes = []
