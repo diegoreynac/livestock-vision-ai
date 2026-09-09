@@ -86,3 +86,39 @@ class KeypointName(Enum):
 
     RIGHT_REAR_HOOF = auto()
 
+
+# ==========================================================
+# Annotation Status (audit)
+# ==========================================================
+
+class AnnotationStatus(Enum):
+    """
+    Per-image/per-annotation bounding box quality classification, used by
+    the read-only annotation quality audit.
+    """
+
+    # Annotation exists, bbox has four finite values, positive width and
+    # height, and lies within the image boundaries.
+    VALID = "valid"
+
+    # The image exists in COCO images[] but no annotation references it.
+    MISSING = "missing"
+
+    # An annotation exists and its bbox is exactly [0, 0, 0, 0].
+    ZERO_BBOX = "zero_bbox"
+
+    # An annotation exists but its bbox is structurally invalid: wrong
+    # shape, non-finite values, or non-positive width/height.
+    INVALID_BBOX = "invalid_bbox"
+
+    # BBox is numerically valid with positive dimensions, but extends
+    # outside the image boundaries.
+    OUT_OF_BOUNDS = "out_of_bounds"
+
+    # More than one annotation references the same image. This is an
+    # audit finding, not automatically an error.
+    MULTIPLE_ANNOTATIONS = "multiple_annotations"
+
+    def __str__(self) -> str:
+
+        return self.value

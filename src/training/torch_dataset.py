@@ -120,12 +120,18 @@ class LivestockDataset(Dataset[dict[str, Any]]):
                     "Side and Rear images have incompatible dimensions after preprocessing: "
                     f"{tuple(images[0].shape[1:])} and {tuple(images[1].shape[1:])}."
                 )
-            image_tensor = torch.cat(images, dim=0)
-        else:
-            image_tensor = images[0]
+
+            return {
+                "side_image": images[0],
+                "rear_image": images[1],
+                "bbox_side": torch.tensor(processed_boxes[0], dtype=torch.float32),
+                "bbox_rear": torch.tensor(processed_boxes[1], dtype=torch.float32),
+                "weight": torch.tensor([self._weight(sample)], dtype=torch.float32),
+                "animal_id": sample.animal_id,
+            }
 
         return {
-            "image": image_tensor,
+            "image": images[0],
             "bbox": torch.tensor(processed_boxes[0], dtype=torch.float32),
             "weight": torch.tensor([self._weight(sample)], dtype=torch.float32),
             "animal_id": sample.animal_id,
