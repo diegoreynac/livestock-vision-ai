@@ -187,23 +187,33 @@ class Trainer:
         self,
         batch: dict[str, Any],
     ) -> dict[str, Any]:
-        """Extract model inputs from a training batch."""
+        """Extract and adapt batch inputs to the model's input contract."""
+
+        input_mode = getattr(self.model, "input_mode", None)
 
         if "image" in batch:
-            return {"image": batch["image"]}
+            if input_mode is None:
+                return {"image": batch["image"]}
 
-        model_inputs: dict[str, Any] = {}
+            mode_name = getattr(input_mode, "name", str(input_mode))
 
-        if "side_image" in batch:
-            model_inputs["side_image"] = batch["side_image"]
+            if mode_name == "SIDE":
+                return {"side": batch["image"]}
 
-        if "rear_image" in batch:
-            model_inputs["rear_image"] = batch["rear_image"]
+            if mode_name == "REAR":
+                return {"rear": batch["image"]}
 
-        if not model_inputs:
-            raise ValueError("Batch does not contain model input images.")
+            raise ValueError(
+                f"Batch contains a single 'image', but model input mode is {mode_name}."
+            )
 
-        return model_inputs
+        if "side_image" in batch and "rear_image" in batch:
+            return {
+                "side": batch["side_image"],
+                "rear": batch["rear_image"],
+            }
+
+        raise ValueError("Batch does not contain model input images.")
 
     def _move_batch_to_device(
         self,

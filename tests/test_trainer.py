@@ -6,7 +6,32 @@ from torch import nn
 
 from src.training.checkpoint import CheckpointManager
 from src.training.trainer import EpochResult, Trainer
+from src.training.torch_dataset import InputMode
 
+
+class InputModeModel(nn.Module):
+    def __init__(self, input_mode: InputMode) -> None:
+        super().__init__()
+        self.input_mode = input_mode
+        self.linear = nn.Linear(4, 1)
+
+    def forward(
+        self,
+        side: torch.Tensor | None = None,
+        rear: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        if self.input_mode is InputMode.SIDE:
+            assert side is not None
+            return self.linear(side)
+
+        if self.input_mode is InputMode.REAR:
+            assert rear is not None
+            return self.linear(rear)
+
+        assert side is not None
+        assert rear is not None
+
+        return self.linear(side + rear)
 
 class SimpleModel(nn.Module):
     def __init__(self) -> None:
@@ -42,6 +67,24 @@ def create_trainer(
         optimizer=optimizer,
         loss_fn=loss_function,
         checkpoint_manager=checkpoint_manager,
+    )
+
+def create_input_mode_trainer(
+    tmp_path: Path,
+    input_mode: InputMode,
+) -> Trainer:
+    model = InputModeModel(input_mode)
+
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=1e-2,
+    )
+
+    return Trainer(
+        model=model,
+        optimizer=optimizer,
+        loss_fn=loss_function,
+        checkpoint_manager=CheckpointManager(tmp_path),
     )
 
 
@@ -210,3 +253,116 @@ def test_trainer_can_run_without_checkpoint_manager(
     )
 
     assert len(history) == 1
+
+def test_model_inputs_adapts_side_image(
+    tmp_path: Path,
+) -> None:
+    trainer = create_input_mode_trainer(
+        tmp_path,
+        InputMode.SIDE,
+    )
+
+    image = torch.randn(2, 4)
+
+    result = trainer._model_inputs(
+        {"image": image}
+    )
+
+    assert result == {"side": image}
+
+def test_model_inputs_adapts_rear_image(
+    tmp_path: Path,
+) -> None:
+    trainer = create_input_mode_trainer(
+        tmp_path,
+        InputMode.REAR,
+    )
+
+    image = torch.randn(2, 4)
+
+    result = trainer._model_inputs(
+        {"image": image}
+    )
+
+    assert result == {"rear": image}
+
+def test_model_inputs_adapts_dual_view_images(
+    tmp_path: Path,
+) -> None:
+    trainer = create_input_mode_trainer(
+        tmp_path,
+        InputMode.SIDE_REAR,
+    )
+
+    side_image = torch.randn(2, 4)
+    rear_image = torch.randn(2, 4)
+
+    result = trainer._model_inputs(
+        {
+            "side_image": side_image,
+            "rear_image": rear_image,
+        }
+    )
+
+    assert result == {
+        "side": side_image,
+        "rear": rear_image,
+    }
+
+def test_train_epoch_supports_side_input_mode(
+    tmp_path: Path,
+) -> None:
+    trainer = create_input_mode_trainer(
+        tmp_path,
+        InputMode.SIDE,
+    )
+
+    dataloader = [
+        {
+            "image": torch.randn(2, 4),
+            "target": torch.randn(2, 1),
+        }
+    ]
+
+    result = trainer.train_epoch(dataloader)
+
+    assert result.loss >= 0.0
+
+def test_train_epoch_supports_rear_input_mode(
+    tmp_path: Path,
+) -> None:
+    trainer = create_input_mode_trainer(
+        tmp_path,
+        InputMode.REAR,
+    )
+
+    dataloader = [
+        {
+            "image": torch.randn(2, 4),
+            "target": torch.randn(2, 1),
+        }
+    ]
+
+    result = trainer.train_epoch(dataloader)
+
+    assert result.loss >= 0.0
+
+def test_train_epoch_supports_dual_view_input_mode(
+    tmp_path: Path,
+) -> None:
+    trainer = create_input_mode_trainer(
+        tmp_path,
+        InputMode.SIDE_REAR,
+    )
+
+    dataloader = [
+        {
+            "side_image": torch.randn(2, 4),
+            "rear_image": torch.randn(2, 4),
+            "target": torch.randn(2, 1),
+        }
+    ]
+
+    result = trainer.train_epoch(dataloader)
+
+    assert result.loss >= 0.0
