@@ -87,14 +87,14 @@ class CheckpointManager:
 
     def load(
         self,
-        filename: str,
+        filename: str | Path,
         model: nn.Module,
         optimizer: torch.optim.Optimizer | None = None,
         map_location: str | torch.device = "cpu",
     ) -> dict[str, Any]:
         """Load a checkpoint into a model and optionally an optimizer."""
 
-        if not filename.strip():
+        if isinstance(filename, str) and not filename.strip():
             raise ValueError("filename must not be empty.")
 
         checkpoint_path = self.output_directory / filename
