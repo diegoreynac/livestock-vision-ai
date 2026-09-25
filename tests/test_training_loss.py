@@ -392,6 +392,33 @@ def test_mobilenet_dummy_training():
     )
 
     assert result is not None
+    assert len(result) == config.epochs
+
+    for epoch_result in result:
+        assert "epoch" in epoch_result
+        assert "train_loss" in epoch_result
+        assert "train_metrics" in epoch_result
+        assert "validation_loss" in epoch_result
+        assert "validation_metrics" in epoch_result
+
+        assert isinstance(epoch_result["epoch"], int)
+        assert isinstance(epoch_result["train_loss"], float)
+        assert isinstance(epoch_result["validation_loss"], float)
+        assert isinstance(epoch_result["train_metrics"], dict)
+        assert isinstance(epoch_result["validation_metrics"], dict)
+
+        assert torch.isfinite(
+            torch.tensor(epoch_result["train_loss"])
+        )
+        assert torch.isfinite(
+            torch.tensor(epoch_result["validation_loss"])
+        )
+
+    assert "mae" in epoch_result["train_metrics"]
+    assert "mae" in epoch_result["validation_metrics"]
+
+    assert isinstance(epoch_result["train_metrics"]["mae"], float)
+    assert isinstance(epoch_result["validation_metrics"]["mae"], float)
 
     final_parameters = {
         name: parameter.detach().clone()
