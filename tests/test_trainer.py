@@ -5,7 +5,8 @@ import torch
 from torch import nn
 
 from src.training.checkpoint import CheckpointManager
-from src.training.trainer import EpochResult, Trainer
+from src.training.losses import MultiTaskLoss
+from src.training.trainer import EpochResult, LossFunction, Trainer
 from src.training.torch_dataset import InputMode
 
 
@@ -32,6 +33,7 @@ class InputModeModel(nn.Module):
         assert rear is not None
 
         return self.linear(side + rear)
+
 
 class SimpleModel(nn.Module):
     def __init__(self) -> None:
@@ -68,6 +70,7 @@ def create_trainer(
         loss_fn=loss_function,
         checkpoint_manager=checkpoint_manager,
     )
+
 
 def create_input_mode_trainer(
     tmp_path: Path,
@@ -254,6 +257,7 @@ def test_trainer_can_run_without_checkpoint_manager(
 
     assert len(history) == 1
 
+
 def test_model_inputs_adapts_side_image(
     tmp_path: Path,
 ) -> None:
@@ -270,6 +274,7 @@ def test_model_inputs_adapts_side_image(
 
     assert result == {"side": image}
 
+
 def test_model_inputs_adapts_rear_image(
     tmp_path: Path,
 ) -> None:
@@ -285,6 +290,7 @@ def test_model_inputs_adapts_rear_image(
     )
 
     assert result == {"rear": image}
+
 
 def test_model_inputs_adapts_dual_view_images(
     tmp_path: Path,
@@ -309,6 +315,7 @@ def test_model_inputs_adapts_dual_view_images(
         "rear": rear_image,
     }
 
+
 def test_train_epoch_supports_side_input_mode(
     tmp_path: Path,
 ) -> None:
@@ -327,6 +334,7 @@ def test_train_epoch_supports_side_input_mode(
     result = trainer.train_epoch(dataloader)
 
     assert result.loss >= 0.0
+
 
 def test_train_epoch_supports_rear_input_mode(
     tmp_path: Path,
@@ -347,6 +355,7 @@ def test_train_epoch_supports_rear_input_mode(
 
     assert result.loss >= 0.0
 
+
 def test_train_epoch_supports_dual_view_input_mode(
     tmp_path: Path,
 ) -> None:
@@ -366,3 +375,29 @@ def test_train_epoch_supports_dual_view_input_mode(
     result = trainer.train_epoch(dataloader)
 
     assert result.loss >= 0.0
+
+
+def test_multitask_loss_satisfies_trainer_contract() -> None:
+    loss_fn = MultiTaskLoss()
+
+    assert isinstance(loss_fn, LossFunction)
+
+
+def test_trainer_accepts_multitask_loss_contract(
+    tmp_path: Path,
+) -> None:
+    model = SimpleModel()
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=1e-2,
+    )
+    loss_fn = MultiTaskLoss()
+
+    trainer = Trainer(
+        model=model,
+        optimizer=optimizer,
+        loss_fn=loss_fn,
+        checkpoint_manager=CheckpointManager(tmp_path),
+    )
+
+    assert trainer.loss_fn is loss_fn

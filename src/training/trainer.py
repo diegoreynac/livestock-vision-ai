@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 import torch
 from torch import nn
@@ -11,7 +11,17 @@ from src.training.checkpoint import CheckpointManager
 from src.training.metrics import TrainingMetrics
 
 
-LossFunction = Callable[[Any, dict[str, Any]], torch.Tensor]
+@runtime_checkable
+class LossFunction(Protocol):
+    """Callable contract for differentiable training losses."""
+
+    def __call__(
+        self,
+        outputs: Any,
+        batch: dict[str, Any],
+    ) -> torch.Tensor:
+        """Compute a scalar loss from model outputs and batch targets."""
+        ...
 
 
 @dataclass(slots=True)
