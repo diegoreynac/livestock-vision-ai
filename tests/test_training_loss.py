@@ -135,6 +135,22 @@ class TinyDualViewModel(nn.Module):
             weight=self.weight_head(fused_features),
         )
 
+class DummyLivestockDataset(torch.utils.data.Dataset):
+    def __init__(self, images, bbox, weight):
+        self.images = images
+        self.bbox = bbox
+        self.weight = weight
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, index):
+        return {
+            "image": self.images[index],
+            "bbox": self.bbox[index],
+            "weight": self.weight[index],
+        }
+
 def _single_view_batch() -> dict[str, object]:
     return {
         "image": torch.full((2, 3, 8, 8), 0.25),
@@ -290,3 +306,102 @@ def test_multitask_loss_dual_view_uses_both_bbox_targets() -> None:
     modified_loss = loss_fn(outputs, modified_batch)
 
     assert not torch.equal(original_loss, modified_loss)
+
+def test_mobilenet_dummy_training():
+    """Verify that MobileNetV3 Small can complete a short training run."""
+    import torch
+    from torch.utils.data import DataLoader
+
+    from src.models.torch_models import DualViewTorchModel, InputMode
+    from src.training.config import TrainingConfig
+    from src.training.losses import MultiTaskLoss, MultiTaskLossConfig
+    from src.training.trainer import Trainer
+    from src.training.optimizer import OptimizerFactory
+
+    torch.manual_seed(42)
+
+    batch_size = 2
+    num_samples = 4
+
+    images = torch.randn(num_samples, 3, 224, 224)
+    bbox = torch.tensor(
+        [
+            [0.10, 0.10, 0.80, 0.80],
+            [0.15, 0.15, 0.75, 0.75],
+            [0.20, 0.20, 0.70, 0.70],
+            [0.25, 0.25, 0.65, 0.65],
+        ],
+        dtype=torch.float32,
+    )
+    weight = torch.tensor(
+        [[120.0], [140.0], [160.0], [180.0]],
+        dtype=torch.float32,
+    )
+
+    dataset = DummyLivestockDataset(images, bbox, weight)
+
+    model = DualViewTorchModel(
+        architecture="mobilenet",
+        variant="small",
+        input_mode=InputMode.SIDE,
+        pretrained=True,
+    )
+
+    loss_fn = MultiTaskLoss(
+        MultiTaskLossConfig(
+            bbox_weight=1.0,
+            weight_weight=1.0,
+        )
+    )
+
+    config = TrainingConfig(
+        seed=42,
+        input_size=(224, 224),
+        batch_size=batch_size,
+        epochs=2,
+        learning_rate=1e-3,
+        weight_decay=1e-4,
+        device="cpu",
+    )
+
+    optimizer = OptimizerFactory.create(model, config)
+
+    dataloader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+    )
+
+    trainer = Trainer(
+        model=model,
+        optimizer=optimizer,
+        loss_fn=loss_fn,
+        device=config.device,
+    )   
+
+    initial_parameters = {
+        name: parameter.detach().clone()
+        for name, parameter in model.named_parameters()
+        if parameter.requires_grad
+    }
+
+    result = trainer.fit(
+        train_dataloader=dataloader,
+        validation_dataloader=dataloader,
+        epochs=config.epochs,
+    )
+
+    assert result is not None
+
+    final_parameters = {
+        name: parameter.detach().clone()
+        for name, parameter in model.named_parameters()
+        if parameter.requires_grad
+    }
+
+    parameters_changed = any(
+        not torch.equal(initial_parameters[name], final_parameters[name])
+        for name in initial_parameters
+    )
+
+    assert parameters_changed
