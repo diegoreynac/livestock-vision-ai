@@ -79,6 +79,7 @@ class DualViewTorchModel(BaseModel, nn.Module):
         variant: str = "default",
         share_backbone: bool = False,
         input_mode: InputMode = InputMode.SIDE_REAR,
+        pretrained: bool = False,
     ) -> None:
         nn.Module.__init__(self)
         if not isinstance(input_mode, InputMode):
@@ -90,6 +91,7 @@ class DualViewTorchModel(BaseModel, nn.Module):
         self.variant = variant
         self.share_backbone = share_backbone
         self.input_mode = input_mode
+        self.pretrained = pretrained
 
         # Build per-view backbones on demand. Only the views required by the
         # input mode are constructed so that count_parameters()/model_size()
@@ -107,8 +109,8 @@ class DualViewTorchModel(BaseModel, nn.Module):
                 feat_dim = 960
 
             def _make_backbone() -> nn.Module:
-                # use feature extractor portion; we global-pool the feature map
-                return factory(pretrained=False).features
+                # Use the feature extractor portion; we global-pool the feature map.
+                return factory(pretrained=self.pretrained).features
 
             self.use_torchvision_backbone = True
 
@@ -120,7 +122,7 @@ class DualViewTorchModel(BaseModel, nn.Module):
             feat_dim = 1280
 
             def _make_backbone() -> nn.Module:
-                return factory(pretrained=False).features
+                return factory(pretrained=self.pretrained).features
 
             self.use_torchvision_backbone = True
 
