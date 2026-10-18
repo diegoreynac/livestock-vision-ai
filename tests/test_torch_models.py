@@ -275,6 +275,66 @@ class TestSingleViewSide(unittest.TestCase):
         self.model.predict(self.side)
         self.assertFalse(self.model.training)
 
+    def test_pretrained_flag_is_stored(self):
+        model_pretrained = DualViewTorchModel(
+            architecture="mobilenet",
+            variant="small",
+            input_mode=InputMode.SIDE,
+            pretrained=True,
+        )
+        model_random = DualViewTorchModel(
+            architecture="mobilenet",
+            variant="small",
+            input_mode=InputMode.SIDE,
+            pretrained=False,
+        )
+
+        self.assertTrue(model_pretrained.pretrained)
+        self.assertFalse(model_random.pretrained)
+
+    def test_pretrained_mobilenet_forward_contract(self):
+        model = DualViewTorchModel(
+            architecture="mobilenet",
+            variant="small",
+            input_mode=InputMode.SIDE,
+            pretrained=True,
+        )
+
+        out = model(self.side)
+
+        self.assertIsInstance(out, ModelOutput)
+        self.assertIsInstance(out.bbox_side, torch.Tensor)
+        self.assertEqual(tuple(out.bbox_side.shape), (1, 4))
+        self.assertIsNone(out.bbox_rear)
+        self.assertIsInstance(out.weight, torch.Tensor)
+        self.assertEqual(tuple(out.weight.shape), (1, 1))
+        self.assertTrue(out.bbox_side.requires_grad)
+        self.assertTrue(out.weight.requires_grad)
+
+    def test_pretrained_and_non_pretrained_backbones_differ(self):
+        torch.manual_seed(42)
+
+        model_random = DualViewTorchModel(
+            architecture="mobilenet",
+            variant="small",
+            input_mode=InputMode.SIDE,
+            pretrained=False,
+        )
+
+        model_pretrained = DualViewTorchModel(
+            architecture="mobilenet",
+            variant="small",
+            input_mode=InputMode.SIDE,
+            pretrained=True,
+        )
+
+        random_parameter = next(model_random.backbone_side.parameters())
+        pretrained_parameter = next(model_pretrained.backbone_side.parameters())
+
+        self.assertFalse(
+            torch.equal(random_parameter, pretrained_parameter)
+        )
+
 
 class TestSingleViewRear(unittest.TestCase):
     """InputMode.REAR: one rear image -> bbox_rear + weight (+ sex logits)."""

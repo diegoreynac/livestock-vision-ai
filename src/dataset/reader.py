@@ -87,64 +87,54 @@ class DatasetReader:
     # Private
     # =====================================================
 
-    def _discover_image_folders(
-        self,
-    ) -> list[ImageFolder]:
-
+    
+    def _discover_image_folders(self) -> list[ImageFolder]:
         folders = []
-
-        pixel_root = (
-            self.context.config.pixel_dataset
-        )
+        pixel_root = self.context.config.pixel_dataset
 
         for dataset_dir in sorted(pixel_root.iterdir()):
-
             if not dataset_dir.is_dir():
                 continue
 
-            dataset_type = DatasetType.from_string(
-                dataset_dir.name
-            )
+            # Ignorar directorios que no sean datasets B2, B3 o B4.
+            try:
+                dataset_type = DatasetType.from_string(dataset_dir.name)
+            except ValueError:
+                self.context.logger.warning(
+                    f"Skipping unsupported dataset directory: {dataset_dir.name}"
+                )
+                continue
 
             for folder in sorted(dataset_dir.iterdir()):
-
-                images_path = folder / "images"
-
-                if not images_path.exists():
+                if not folder.is_dir():
                     continue
 
-                view = View.from_string(
-                    folder.name
-                )
+                images_path = folder / "images"
+                if not images_path.is_dir():
+                    continue
+
+                try:
+                    view = View.from_string(folder.name)
+                except ValueError:
+                    self.context.logger.warning(
+                        f"Skipping unsupported view directory: {folder.name}"
+                    )
+                    continue
 
                 coco_files = sorted(folder.glob("*.json"))
-
-                annotation_file = (
-                    coco_files[0]
-                    if coco_files
-                    else None
-                )
+                annotation_file = coco_files[0] if coco_files else None
 
                 folders.append(
-
                     ImageFolder(
-
                         dataset=dataset_type,
-
                         folder_name=folder.name,
-
                         view=view,
-
                         path=images_path,
-
                         annotation_file=annotation_file,
-
                     )
-
                 )
 
         return folders
-
     # -----------------------------------------------------
 
     def _read_folder(

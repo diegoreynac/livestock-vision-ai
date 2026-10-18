@@ -79,6 +79,7 @@ class DualViewTorchModel(BaseModel, nn.Module):
         variant: str = "default",
         share_backbone: bool = False,
         input_mode: InputMode = InputMode.SIDE_REAR,
+        pretrained: bool = False,
     ) -> None:
         nn.Module.__init__(self)
         if not isinstance(input_mode, InputMode):
@@ -90,6 +91,7 @@ class DualViewTorchModel(BaseModel, nn.Module):
         self.variant = variant
         self.share_backbone = share_backbone
         self.input_mode = input_mode
+        self.pretrained = pretrained
 
         # Build per-view backbones on demand. Only the views required by the
         # input mode are constructed so that count_parameters()/model_size()
@@ -102,13 +104,16 @@ class DualViewTorchModel(BaseModel, nn.Module):
             if variant in ("small", "v3-small"):
                 factory = tv_models.mobilenet_v3_small
                 feat_dim = 576  # mobilenet_v3_small final feature channels before classifier
+                default_weights = tv_models.MobileNet_V3_Small_Weights.DEFAULT
             else:
                 factory = tv_models.mobilenet_v3_large
                 feat_dim = 960
+                default_weights = tv_models.MobileNet_V3_Large_Weights.DEFAULT
 
             def _make_backbone() -> nn.Module:
-                # use feature extractor portion; we global-pool the feature map
-                return factory(pretrained=False).features
+                # Use the feature extractor portion; we global-pool the feature map.
+                weights = default_weights if self.pretrained else None
+                return factory(weights=weights).features
 
             self.use_torchvision_backbone = True
 
@@ -120,7 +125,8 @@ class DualViewTorchModel(BaseModel, nn.Module):
             feat_dim = 1280
 
             def _make_backbone() -> nn.Module:
-                return factory(pretrained=False).features
+                weights = tv_models.EfficientNet_B0_Weights.DEFAULT if self.pretrained else None
+                return factory(weights=weights).features
 
             self.use_torchvision_backbone = True
 
