@@ -125,7 +125,8 @@ class DualViewTorchModel(BaseModel, nn.Module):
             feat_dim = 1280
 
             def _make_backbone() -> nn.Module:
-                return factory(pretrained=self.pretrained).features
+                weights = tv_models.EfficientNet_B0_Weights.DEFAULT if self.pretrained else None
+                return factory(weights=weights).features
 
             self.use_torchvision_backbone = True
 
