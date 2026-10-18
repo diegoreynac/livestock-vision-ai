@@ -104,13 +104,16 @@ class DualViewTorchModel(BaseModel, nn.Module):
             if variant in ("small", "v3-small"):
                 factory = tv_models.mobilenet_v3_small
                 feat_dim = 576  # mobilenet_v3_small final feature channels before classifier
+                default_weights = tv_models.MobileNet_V3_Small_Weights.DEFAULT
             else:
                 factory = tv_models.mobilenet_v3_large
                 feat_dim = 960
+                default_weights = tv_models.MobileNet_V3_Large_Weights.DEFAULT
 
             def _make_backbone() -> nn.Module:
                 # Use the feature extractor portion; we global-pool the feature map.
-                return factory(pretrained=self.pretrained).features
+                weights = default_weights if self.pretrained else None
+                return factory(weights=weights).features
 
             self.use_torchvision_backbone = True
 
